@@ -24,13 +24,15 @@ class Server:
         self.db_manager = DatabaseManager("localhost", "root", "NewStrongPassword1!", "verifile_db")
         create_all_tables(self.db_manager)
         self.encryptor = Encryption()
-        print(f"{CYAN}{BOLD}🌐 Database connected and tables verified.{RESET}")
+        print(f"{CYAN}{BOLD} Database connected and tables verified.{RESET}")
 
     def handle_client(self, client_socket):
         try:
-            print(f"{YELLOW}⚡ Handling new client connection...{RESET}")
+            print(f"{YELLOW} Handling new client connection...{RESET}")
             username = self.encryptor.receive_encrypted_message(client_socket)
             password = self.encryptor.receive_encrypted_message(client_socket)
+            email = self.encryptor.receive_encrypted_message(client_socket)
+            role = self.encryptor.receive_encrypted_message(client_socket)
             client_ip, client_port = client_socket.getpeername()
 
             existing = self.db_manager.get_rows_with_value("clients", "client_username", username)
@@ -47,11 +49,12 @@ class Server:
                         [datetime.now(), client_ip, client_port]
                     )
                     client_id = existing[0][0]
-                    print(f"{GREEN}✅ Returning user authenticated: {username} (ID {client_id}){RESET}")
+                    print(f"{GREEN} Returning user authenticated: {username} (ID {client_id}){RESET}")
                     self.encryptor.send_encrypted_message(client_socket, "WELCOME BACK")
                     self.encryptor.send_encrypted_message(client_socket, str(client_id))
+                    #move to cli and start creating, uploading and selling
                 else:
-                    print(f"{RED}❌ Authentication failed for user: {username}{RESET}")
+                    print(f"{RED} Authentication failed for user: {username}{RESET}")
                     self.encryptor.send_encrypted_message(client_socket, "AUTHENTICATION FAILED")
             else:
                 hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
@@ -59,29 +62,30 @@ class Server:
                     "clients",
                     "(ip, port, client_username, client_password_hash, email, last_visit, role)",
                     "(%s,%s,%s,%s,%s,%s,%s)",
-                    (client_ip, client_port, username, hashed_password, None, datetime.now(), None)
+                    (client_ip, client_port, username, hashed_password, email, datetime.now(), role)
                 )
                 new_client = self.db_manager.get_rows_with_value("clients", "client_username", username)
                 client_id = new_client[0][0]
-                print(f"{MAGENTA}🆕 New user registered: {username} (ID {client_id}){RESET}")
+                print(f"{MAGENTA} New user registered: {username} (ID {client_id}){RESET}")
                 self.encryptor.send_encrypted_message(client_socket, "NEW USER REGISTERED")
                 self.encryptor.send_encrypted_message(client_socket, str(client_id))
+                #move to cli and start creating, uploading and selling
 
         except Exception as e:
-            print(f"{RED}⚠️ Error handling client: {e}{RESET}")
+            print(f"{RED} Error handling client: {e}{RESET}")
         finally:
-            print(f"{YELLOW}🔌 Connection closed for client.{RESET}")
+            print(f"{YELLOW} Connection closed for client.{RESET}")
             client_socket.close()
 
     def start_server(self):
         server_socket = socket.socket()
         server_socket.bind((IP, PORT))
         server_socket.listen()
-        print(f"{CYAN}{BOLD}🚀 Server started — waiting for connections on {IP}:{PORT}...{RESET}")
+        print(f"{CYAN}{BOLD} Server started — waiting for connections on {IP}:{PORT}...{RESET}")
 
         while True:
             client_socket, addr = server_socket.accept()
-            print(f"{GREEN}🔗 Client connected: {addr}{RESET}")
+            print(f"{GREEN} Client connected: {addr}{RESET}")
             threading.Thread(target=self.handle_client, args=(client_socket,), daemon=True).start()
 
 
