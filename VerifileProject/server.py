@@ -1,12 +1,15 @@
+# Ilana Ben Guy
+# Project VeriFile
 """
-version 1
-database
-client uploads image, application checks if image isn't
-already signed, if not image gets signature.
-second client who "bought" the image
-wants to upload it to the server and sell it. The application checks using public key
-if image hasn't been tampered with.
-returns status msg
+Version 0
+Database: clients, files, keys. (created)
+Basic Structure:
+    Client uploads image, application checks if image isn't
+    already signed, if not image gets signature.
+    Second client who "bought" the image ( his role is "seller" )
+    wants to upload it to the server and sell it.
+    The application checks using public key if image hasn't been tampered with.
+    returns status msg
 """
 import socket
 import threading
