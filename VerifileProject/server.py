@@ -19,6 +19,8 @@ from constants import IP, PORT, CYAN, GREEN, RED, YELLOW, MAGENTA, RESET, BOLD
 from db_manager import DatabaseManager
 from create_tables import create_all_tables
 from encrypt import Encryption
+
+
 class Server:
     def __init__(self):
         self.db_manager = DatabaseManager("localhost", "root", "NewStrongPassword1!", "verifile_db")

@@ -47,17 +47,19 @@ def create_all_tables(db_manager):
 
     # --- Keys Table ---
     db_manager.create_table(
-        "keys_table",
-        """(
-            key_id INTEGER PRIMARY KEY AUTO_INCREMENT,
-            user_id INTEGER,
-            file_id INTEGER,
-            private_key TEXT,
-            public_key TEXT,
-            created_at DATETIME,
-            FOREIGN KEY (user_id) REFERENCES clients(user_id),
-            FOREIGN KEY (file_id) REFERENCES files(file_id)
-        )"""
-    )
+    "history_table",
+    """(
+        key_id INTEGER PRIMARY KEY AUTO_INCREMENT,
+        file_id INTEGER,                     
+        user_id INTEGER,                      
+        action TEXT CHECK (action IN ('sign', 'verify')),  
+        hash_value TEXT,                     
+        signature TEXT,                      
+        verified BOOLEAN,                   
+        created_at DATETIME,                 
+        FOREIGN KEY (file_id) REFERENCES files(file_id),
+        FOREIGN KEY (user_id) REFERENCES clients(user_id)
+    )"""
+)
 
-    print("✅ All tables created successfully.")
+print("✅ All tables created successfully.")
