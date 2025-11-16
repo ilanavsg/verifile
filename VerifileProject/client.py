@@ -94,7 +94,28 @@ class Client:
         self.encryptor.send_encrypted_message(self.client_socket, email)
         self.encryptor.send_encrypted_message(self.client_socket, role)
         response = self.encryptor.receive_encrypted_message(self.client_socket)
-        print(f"{YELLOW} Server: {response}{RESET}")
+        print(f"{YELLOW}{response}{RESET}")
+
+    def send_image_bytes(self, file_path):
+        filename = os.path.basename(file_path)
+
+        with open(file_path, "rb") as f:
+            data = f.read()
+
+        # Tell server file name
+        self.encryptor.send_encrypted_message(self.client_socket, filename)
+
+        # Tell server number of bytes
+        self.encryptor.send_encrypted_message(self.client_socket, str(len(data)))
+
+        # Wait for confirmation
+        ready = self.encryptor.receive_encrypted_message(self.client_socket)
+        if ready != "READY_FOR_BYTES":
+            print("Server not ready to receive bytes")
+            return
+
+        # Send actual bytes (not encrypted for binary compatibility)
+        self.client_socket.sendall(data)
 
     def run(self):
         self.connect_to_server()
@@ -105,8 +126,35 @@ class Client:
         self.send_client_info()
         client_id = self.encryptor.receive_encrypted_message(self.client_socket)
         print(f"{GREEN} Assigned client ID: {client_id}{RESET}")
-        print(f"{CYAN} Session complete. Closing connection...{RESET}")
+
+        while True:
+            server_menu = self.encryptor.receive_encrypted_message(self.client_socket)
+            print(server_menu)
+
+            client_ans = input().strip()
+            self.encryptor.send_encrypted_message(self.client_socket, client_ans)
+
+            if client_ans == "1":
+                server_msg = self.encryptor.receive_encrypted_message(self.client_socket)
+                print(server_msg)
+                file_path = input("Enter local image path: ").strip()
+                if not os.path.exists(file_path):
+                    print(f"{RED}❌ File does not exist.")
+                    continue
+                self.send_image_bytes(file_path)
+                response = self.encryptor.receive_encrypted_message(self.client_socket)
+                print(f"{response}")
+
+            elif client_ans == "2":
+                response = self.encryptor.receive_encrypted_message(self.client_socket)
+                print(f"{CYAN} {response} Session complete. Closing connection...{RESET}")
+                break
+
+            else:
+                response = self.encryptor.receive_encrypted_message(self.client_socket)
+                print(f"{RED}{response}Unknown command!")
         self.client_socket.close()
+
 
 
 if __name__ == "__main__":
