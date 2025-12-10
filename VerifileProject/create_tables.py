@@ -45,7 +45,7 @@ def create_all_tables(db_manager):
         )"""
     )
 
-    # --- Keys Table ---
+    # --- History Table ---
     db_manager.create_table(
     "history_table",
     """(

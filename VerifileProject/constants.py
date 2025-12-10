@@ -5,7 +5,7 @@ init(autoreset=True)
 
 CHUNK_SIZE = 4096
 IP = "127.0.0.1"
-PORT = 9922
+PORT = 9923
 
 DB_CONFIG = {
     "host": "localhost",
