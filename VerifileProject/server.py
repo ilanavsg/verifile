@@ -28,13 +28,6 @@ class Server:
         existing = self.db_manager.get_rows_with_value("files", "hash_value", hash_hex)
         return bool(existing)
 
-    def build_role_menu(self):
-        base = "===== VeriFile Menu =====\n"
-        base += "1. Upload image for signing\n"
-        base += "2. Buy\n3. Sell\n4. Exit\n"
-        base += "Choose an option:"
-        return base
-
     def handle_upload_for_signature(self, client_socket, user_id):
         try:
             self.encryptor.send_encrypted_message(client_socket, "Send image bytes:")
@@ -75,12 +68,12 @@ class Server:
             signer = Signature(temp_path, PRIVATE_KEY, PUBLIC_KEY, output_signed)
             signer.install_sign_to_img()
             self.encryptor.send_encrypted_message(client_socket, f"Image signed successfully: {output_signed}")
-
+            price = self.encryptor.receive_encrypted_message(client_socket)
             self.db_manager.insert_row(
                 "files",
                 "(owner_id, creator_id, original_filename, stored_filename, _type, upload_date, hash_value, signature, watermarked_file, price, status)",
                 "(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-                (user_id, user_id, filename, output_signed, "image", datetime.now(), hash_hex, "embedded", output_signed, 0.0, "available")
+                (user_id, user_id, filename, output_signed, "image", datetime.now(), hash_hex, "embedded", output_signed, price, "available")
             )
 
         except Exception as e:
@@ -93,11 +86,27 @@ class Server:
             if 'temp_path' in locals() and os.path.exists(temp_path):
                 os.remove(temp_path)
 
+    def handle_buy_option(self, client_socket):
+        images = self.db_manager.get_all_rows("files") 
+        for img in images:
+            filename = img[4]
+            price = str(img[11]) 
+            base_dir = r"C:\\Users\\Cyber_User\\Desktop\\verifile\\VerifileProject\\"
+            path = os.path.join(base_dir, filename)
+            try:
+                with open(path, "rb") as f:
+                    import base64
+                    data = base64.b64encode(f.read()).decode()
+            except:
+                data = ""
+            self.encryptor.send_encrypted_message(client_socket, filename)
+            self.encryptor.send_encrypted_message(client_socket, price)
+            self.encryptor.send_encrypted_message(client_socket, data)
+        self.encryptor.send_encrypted_message(client_socket, "") 
+
     def handle_options(self, client_socket, user_id):
         while True:
             try:
-                menu = self.build_role_menu()
-                self.encryptor.send_encrypted_message(client_socket, menu)
                 cmd = self.encryptor.receive_encrypted_message(client_socket)
                 if not cmd:
                     break
@@ -106,7 +115,7 @@ class Server:
                 if cmd == "1":
                     self.handle_upload_for_signature(client_socket, user_id)
                 elif cmd == "2":
-                    self.encryptor.send_encrypted_message(client_socket, "BUY flow not implemented yet.")
+                    self.handle_buy_option(client_socket)
                 elif cmd == "3":
                     self.encryptor.send_encrypted_message(client_socket, "SELL flow not implemented yet.")
                 elif cmd == "4":

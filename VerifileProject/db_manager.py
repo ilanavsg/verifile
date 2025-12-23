@@ -194,7 +194,31 @@ class DatabaseManager:
         else:
             print(f"Table {table_name} does not exist.")
             return []
-    
+        
+    def get_column_values(self, table_name, column_name):
+        """
+        Get values from a column
+        
+        Args:
+            table_name: Name of the target table
+            column_name: Column to get its values
+            
+        Returns:
+            List of values
+        """
+        if not self.database:
+            raise ValueError("No database selected.")
+            
+        tables = self.show_tables()
+        if table_name in tables:
+            cursor = self.conn.cursor()
+            query = f"SELECT {column_name} FROM {table_name}"
+            cursor.execute(query)
+            return cursor.fetchall()
+        else:
+            print(f"Table {table_name} does not exist.")
+            return []
+        
     def update_row(self, table_name, primary_key_column, primary_key_value, column_names, column_values):
         """
         Update a row in a table
