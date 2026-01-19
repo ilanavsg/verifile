@@ -11,6 +11,7 @@ from io import BytesIO
 import base64
 from PIL import Image, ImageTk
 
+
 class Client:
     def __init__(self):
         self.host = IP
@@ -216,9 +217,9 @@ class Client:
             if not price or not price.replace('.', '', 1).isdigit():
                 messagebox.showerror("Invalid price", "Please enter a valid number.")
                 return
-
             self.encryptor.send_encrypted_message(self.client_socket, price)
             resp = self.encryptor.receive_encrypted_message(self.client_socket)
+            self.add_to_storage(resp.split(":")[1])
             if resp:
                 messagebox.showinfo("Result", resp)
         except Exception as e:

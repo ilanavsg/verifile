@@ -5,7 +5,7 @@ import socket
 import threading
 from datetime import datetime
 import bcrypt
-from constants import IP, PORT, CYAN, GREEN, RED, YELLOW, RESET, BOLD
+from constants import IP, PORT, CYAN, GREEN, RED, YELLOW, RESET, BOLD, MAX_TOTAL_CONNECTIONS, MAX_CONNECTIONS_PER_IP
 from db_manager import DatabaseManager
 from create_tables import create_all_tables
 from encrypt import Encryption
@@ -176,9 +176,42 @@ class Server:
         server_socket.bind((IP, PORT))
         server_socket.listen()
         print(f"{CYAN}Server running on {IP}:{PORT}{RESET}")
-
+        connections = {}
+        total_connections = 0
         while True:
             client_socket, addr = server_socket.accept()
+            ip, port = addr
+            if ip not in connections:
+                connections[ip] = []
+            rows = self.db_manager.get_rows_with_value("clients", "ip", ip)
+            if rows:
+                ddos_status = rows[0][7]
+                if ddos_status:
+                    print(f"{RED}Blocked IP tried to connect: {ip}{RESET}")
+                    client_socket.close()
+                    continue
+            if total_connections >= MAX_TOTAL_CONNECTIONS:
+                print(f"{RED}Max total connections reached{RESET}")
+                client_socket.close()
+                continue
+            if len(connections[ip]) >= MAX_CONNECTIONS_PER_IP:
+                print(f"{RED}DDOS detected from IP {ip}{RESET}")
+                for sock in connections[ip]:
+                    sock.close()
+                connections[ip].clear()
+                if rows:
+                    user_id = rows[0][0]
+                    self.db_manager.update_row(
+                        table_name="clients",
+                        primary_key_column="user_id",
+                        primary_key_value=user_id,
+                        column_names=["ddos_status"],
+                        column_values=[True]
+                    )
+                client_socket.close()
+                continue
+            connections[ip].append(client_socket)
+            total_connections += 1
             print(f"{GREEN}Client connected: {addr}{RESET}")
             threading.Thread(target=self.handle_client, args=(client_socket,), daemon=True).start()
 
