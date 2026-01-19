@@ -19,7 +19,7 @@ def create_all_tables(db_manager):
             client_password_hash TEXT,
             email TEXT,
             last_visit DATETIME,
-            ddos_status BOOL,
+            ddos_status BOOLEAN NOT NULL DEFAULT FALSE,
             role TEXT CHECK (role IN ('buyer', 'seller', 'admin'))
         )"""
     )

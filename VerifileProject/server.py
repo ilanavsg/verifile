@@ -155,8 +155,8 @@ class Server:
                 ip, port = client_socket.getpeername()
                 self.db_manager.insert_row(
                     "clients",
-                    "(ip, port, client_username, client_password_hash, email, last_visit, role)",
-                    "(%s,%s,%s,%s,%s,%s,%s)",
+                    "(ip, port, client_username, client_password_hash, email, last_visit, ddos_status, role)",
+                    "(%s,%s,%s,%s,%s,%s,%s,%s)",
                     (ip, port, username, hashed, email, datetime.now(), role)
                 )
                 user_id = self.db_manager.get_rows_with_value("clients", "client_username", username)[0][0]
@@ -186,7 +186,7 @@ class Server:
             rows = self.db_manager.get_rows_with_value("clients", "ip", ip)
             if rows:
                 ddos_status = rows[0][7]
-                if ddos_status:
+                if ddos_status and ip != '127.0.0.1':
                     print(f"{RED}Blocked IP tried to connect: {ip}{RESET}")
                     client_socket.close()
                     continue
