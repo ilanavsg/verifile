@@ -19,7 +19,8 @@ def create_all_tables(db_manager):
             client_password_hash TEXT,
             email TEXT,
             last_visit DATETIME,
-            ddos_status BOOLEAN NOT NULL DEFAULT FALSE,
+            ddos_status BOOLEAN DEFAULT FALSE,
+            balance INT DEFAULT 1000,
             role TEXT CHECK (role IN ('buyer', 'seller', 'admin'))
         )"""
     )

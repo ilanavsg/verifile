@@ -1,6 +1,6 @@
 # Ilana Ben Guy
 # Project VeriFile
-
+from ui import run_server_ui
 import socket
 import threading
 from datetime import datetime
@@ -12,6 +12,7 @@ from encrypt import Encryption
 from install_signature import Signature
 from Crypto.Hash import SHA256
 import os
+import json
 
 PRIVATE_KEY = "C:\\Users\\Cyber_User\\Desktop\\verifile\\VerifileProject\\private.pem"
 PUBLIC_KEY = "C:\\Users\\Cyber_User\\Desktop\\verifile\\VerifileProject\\public.pem"
@@ -30,6 +31,7 @@ class Server:
 
     def handle_upload_for_signature(self, client_socket, user_id):
         try:
+            all_works = []
             self.encryptor.send_encrypted_message(client_socket, "Send image bytes:")
             filename = self.encryptor.receive_encrypted_message(client_socket)
             img_size_str = self.encryptor.receive_encrypted_message(client_socket)
@@ -147,6 +149,10 @@ class Server:
                     user_id = existing[0][0]
                     self.encryptor.send_encrypted_message(client_socket, "WELCOME BACK")
                     self.encryptor.send_encrypted_message(client_socket, str(user_id))
+                    all_works = self.db_manager.get_column_values_by_id("files", "stored_filename", user_id)
+                    all_works = [work[0] for work in all_works]
+                    payload = json.dumps(all_works)
+                    self.encryptor.send_encrypted_message(client_socket, f"WORKS:{payload}")
                     self.handle_options(client_socket, user_id)
                 else:
                     self.encryptor.send_encrypted_message(client_socket, "AUTH FAILED")
@@ -155,13 +161,17 @@ class Server:
                 ip, port = client_socket.getpeername()
                 self.db_manager.insert_row(
                     "clients",
-                    "(ip, port, client_username, client_password_hash, email, last_visit, ddos_status, role)",
-                    "(%s,%s,%s,%s,%s,%s,%s,%s)",
+                    "(ip, port, client_username, client_password_hash, email, last_visit, role)",
+                    "(%s,%s,%s,%s,%s,%s,%s)",
                     (ip, port, username, hashed, email, datetime.now(), role)
                 )
                 user_id = self.db_manager.get_rows_with_value("clients", "client_username", username)[0][0]
                 self.encryptor.send_encrypted_message(client_socket, "NEW USER REGISTERED")
                 self.encryptor.send_encrypted_message(client_socket, str(user_id))
+                all_works = self.db_manager.get_column_values_by_id("files", "stored_filename", user_id)
+                all_works = [work[0] for work in all_works]
+                payload = json.dumps(all_works)
+                self.encryptor.send_encrypted_message(client_socket, f"WORKS:{payload}")
                 self.handle_options(client_socket, user_id)
         except Exception as e:
             print(f"{RED}Client handler error: {e}{RESET}")
@@ -217,4 +227,11 @@ class Server:
 
 
 if __name__ == "__main__":
-    Server().start_server()
+    server = Server()
+
+    threading.Thread(
+        target=run_server_ui,
+        daemon=True
+    ).start()
+
+    server.start_server()

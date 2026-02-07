@@ -10,6 +10,8 @@ from functools import partial
 from io import BytesIO
 import base64
 from PIL import Image, ImageTk
+from gui import create_main_menu, create_buy_page, create_storage_page
+import json
 
 
 class Client:
@@ -21,6 +23,8 @@ class Client:
         self.root = None
         self.username = ""
         self.client_id = None
+        self.storage_list_frame = None
+        self.my_works = []
 
     def connect_to_server(self):
         try:
@@ -54,6 +58,10 @@ class Client:
         resp2 = self.encryptor.receive_encrypted_message(self.client_socket)
         if resp2:
             self.client_id = int(resp2)
+        resp3 = self.encryptor.receive_encrypted_message(self.client_socket)
+        cmd, data = resp3.split(":", 1)
+        if cmd == "WORKS":
+            self.my_works = json.loads(data)
 
     def show_login_window(self):
         creds = {}
@@ -105,9 +113,9 @@ class Client:
         self.container = tk.Frame(self.root, bg="#fff0f5")
         self.container.pack(fill="both", expand=True)
         self.pages = {}
-        self.pages["main_menu"] = self.create_main_menu(self.container)
-        self.pages["buy_page"] = self.create_buy_page(self.container)
-        self.pages["storage_page"] = self.create_storage_page(self.container)
+        self.pages["main_menu"] = create_main_menu(self, self.container)
+        self.pages["buy_page"] = create_buy_page(self, self.container)
+        self.pages["storage_page"] = create_storage_page(self, self.container)
         self.show_page("main_menu")
         self.root.mainloop()
 
@@ -115,39 +123,8 @@ class Client:
         for page in self.pages.values():
             page.pack_forget()
         self.pages[page_name].pack(fill="both", expand=True)
-
-    def create_main_menu(self, parent):
-        frame = tk.Frame(parent, bg="#fff0f5")
-        tk.Label(frame, text=f"Welcome! {self.username}", font=("Arial", 18), bg="#fff0f5", fg="#ff66b2").pack(pady=10)
-        self.menu_label = tk.Label(frame, text="", font=("Consolas", 11), bg="#fff0f5", justify="left")
-        self.menu_label.pack(pady=5)
-        tk.Button(frame, text="Upload", width=28, command=self.upload_action, bg="#ffd1dc").pack(pady=5)
-        tk.Button(frame, text="Buy", width=28, command=self.buy_action, bg="#ffe6f0").pack(pady=5)
-        tk.Button(frame, text="Sell", width=28, command=self.sell_action, bg="#ffe6f0").pack(pady=5)
-        tk.Button(frame, text="My Storage", width=28, command=lambda: self.show_page("storage_page"), bg="#ffe6f0").pack(pady=5)
-        tk.Button(frame, text="Exit", width=28, command=self.exit_app, bg="#ffb3cc").pack(pady=15)
-        return frame
-
-    def create_buy_page(self, parent):
-        frame = tk.Frame(parent, bg="#fff0f5")
-        tk.Button(frame, text="Back", command=lambda: self.show_page("main_menu"), bg="#ffd1dc").pack(pady=5)
-        canvas = Canvas(frame, bg="#fff0f5")
-        scrollbar = Scrollbar(frame, orient="vertical", command=canvas.yview)
-        scrollable_frame = Frame(canvas, bg="#fff0f5")
-        scrollable_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
-        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
-        canvas.configure(yscrollcommand=scrollbar.set)
-        canvas.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
-        frame.scrollable_frame = scrollable_frame
-        return frame
-
-    def create_storage_page(self, parent):
-        frame = tk.Frame(parent, bg="#fff0f5")
-        tk.Button(frame, text="Back", command=lambda: self.show_page("main_menu"), bg="#ffd1dc").pack(pady=5)
-        self.storage_list_frame = tk.Frame(frame, bg="#fff0f5")
-        self.storage_list_frame.pack(fill="both", expand=True)
-        return frame
+        if page_name == "storage_page":
+            self.render_storage()
 
     def buy_action(self):
         try:
@@ -192,16 +169,33 @@ class Client:
             if resp == "SUCCESS":
                 messagebox.showinfo("Purchase", f"You bought {image_name}!")
                 frame_widget.destroy()
-                self.add_to_storage(image_name)
+                self.render_storage()
             else:
                 messagebox.showerror("Purchase failed", resp)
         except Exception as e:
             messagebox.showerror("Error", str(e))
 
-    def add_to_storage(self, image_name):
-        frame = tk.Frame(self.storage_list_frame, bg="#ffe6f0", bd=1, relief="ridge")
-        frame.pack(padx=5, pady=5, fill="x")
-        tk.Label(frame, text=image_name, bg="#ffe6f0").pack(side="left", padx=10)
+    def render_storage(self):
+        if not self.storage_list_frame:
+            return
+
+        for widget in self.storage_list_frame.winfo_children():
+            widget.destroy()
+
+        for work in self.my_works:
+            item = tk.Frame(
+                self.storage_list_frame,
+                bg="#ffe6f0",
+                bd=1,
+                relief="ridge"
+            )
+            item.pack(padx=5, pady=5, fill="x")
+
+            tk.Label(
+                item,
+                text=work,
+                bg="#ffe6f0"
+            ).pack(side="left", padx=10)
 
     def upload_action(self):
         try:
@@ -217,11 +211,12 @@ class Client:
             if not price or not price.replace('.', '', 1).isdigit():
                 messagebox.showerror("Invalid price", "Please enter a valid number.")
                 return
+
             self.encryptor.send_encrypted_message(self.client_socket, price)
-            resp = self.encryptor.receive_encrypted_message(self.client_socket)
-            self.add_to_storage(resp.split(":")[1])
-            if resp:
-                messagebox.showinfo("Result", resp)
+            resp1 = self.encryptor.receive_encrypted_message(self.client_socket)
+            if resp1:
+                messagebox.showinfo("Result", resp1)
+
         except Exception as e:
             messagebox.showerror("Upload error", str(e))
 
@@ -239,11 +234,18 @@ class Client:
             if self.client_socket:
                 self.encryptor.send_encrypted_message(self.client_socket, "4")
                 try:
-                    self.client_socket.close()
+                    self.encryptor.receive_encrypted_message(self.client_socket)
                 except:
                     pass
+
+                try:
+                    self.client_socket.shutdown(socket.SHUT_RDWR)
+                except:
+                    pass
+                self.client_socket.close()
         except:
             pass
+
         if self.root:
             self.root.destroy()
 
@@ -252,6 +254,7 @@ class Client:
             return
         self.send_client_info()
         self.run_gui()
+
 
 if __name__ == "__main__":
     Client().start()

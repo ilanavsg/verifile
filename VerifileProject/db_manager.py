@@ -218,7 +218,27 @@ class DatabaseManager:
         else:
             print(f"Table {table_name} does not exist.")
             return []
-        
+
+    def get_column_values_by_id(self, table_name, column_name, client_id):
+        if not self.database:
+            raise ValueError("No database selected.")
+
+        tables = self.show_tables()
+        if table_name not in tables:
+            print(f"Table {table_name} does not exist.")
+            return []
+
+        cursor = self.conn.cursor()
+
+        query = f"""
+            SELECT {column_name}
+            FROM {table_name}
+            WHERE owner_id = %s
+        """
+
+        cursor.execute(query, (client_id,))
+        return cursor.fetchall()
+
     def update_row(self, table_name, primary_key_column, primary_key_value, column_names, column_values):
         """
         Update a row in a table
