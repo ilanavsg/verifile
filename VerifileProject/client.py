@@ -1,5 +1,7 @@
+import io
 import socket
 import os
+import threading
 import tkinter as tk
 from tkinter import messagebox, filedialog, Scrollbar, Canvas, Frame
 from tkinter import simpledialog
@@ -128,50 +130,101 @@ class Client:
 
     def buy_action(self):
         try:
+            # Request buy list from server
             self.encryptor.send_encrypted_message(self.client_socket, "2")
         except Exception as e:
             messagebox.showerror("Error", str(e))
             return
+
         self.show_page("buy_page")
+
+        # Clear old widgets
         for widget in self.pages["buy_page"].scrollable_frame.winfo_children():
             widget.destroy()
+
+        images = []
         try:
-            images = []
+            # Receive all images info (name, price, base64 data)
             while True:
                 img_name = self.encryptor.receive_encrypted_message(self.client_socket)
                 if not img_name:
                     break
                 price = self.encryptor.receive_encrypted_message(self.client_socket)
                 img_data = self.encryptor.receive_encrypted_message(self.client_socket)
+                if img_name is None or price is None or img_data is None:
+                    break
                 images.append((img_name, price, img_data))
         except Exception as e:
             messagebox.showerror("Error", str(e))
             return
-        for idx, (name, price, data) in enumerate(images):
-            try:
-                img_bytes = BytesIO(base64.b64decode(data))
-                pil_img = Image.open(img_bytes).resize((150,150))
-                photo = ImageTk.PhotoImage(pil_img)
-            except:
-                photo = None
+
+        # Render images as thumbnails
+        for name, price, data in images:
             frame = tk.Frame(self.pages["buy_page"].scrollable_frame, bg="#ffe6f0", bd=2, relief="ridge")
             frame.pack(padx=10, pady=10, fill="x")
+
+            # Thumbnail image
+            photo = None
+            if data:
+                try:
+                    with BytesIO(base64.b64decode(data)) as img_bytes:
+                        pil_img = Image.open(img_bytes)
+                        pil_img.thumbnail((150, 150))
+                        photo = ImageTk.PhotoImage(pil_img)
+                except Exception:
+                    photo = None
+
             if photo:
-                tk.Label(frame, image=photo).pack(side="left", padx=10)
-                frame.image = photo
+                lbl_img = tk.Label(frame, image=photo)
+                lbl_img.image = photo  # keep reference per widget
+                lbl_img.pack(side="left", padx=10)
+
             tk.Label(frame, text=f"{name}\nPrice: {price}", bg="#ffe6f0", justify="left").pack(side="left", padx=10)
-            tk.Button(frame, text="Buy", bg="#ffd1dc", command=partial(self.confirm_purchase, name, frame)).pack(side="right", padx=10)
+
+            tk.Button(
+                frame,
+                text="Buy",
+                bg="#ffd1dc",
+                command=partial(self.confirm_purchase, name, frame)
+            ).pack(side="right", padx=10)
 
     def confirm_purchase(self, image_name, frame_widget):
         try:
+            # Send purchase request
             self.encryptor.send_encrypted_message(self.client_socket, f"BUY:{image_name}")
             resp = self.encryptor.receive_encrypted_message(self.client_socket)
-            if resp == "SUCCESS":
-                messagebox.showinfo("Purchase", f"You bought {image_name}!")
-                frame_widget.destroy()
-                self.render_storage()
-            else:
+
+            if resp != "SUCCESS":
                 messagebox.showerror("Purchase failed", resp)
+                return
+
+            # Receive filename and size
+            info = self.encryptor.receive_encrypted_message(self.client_socket)
+            filename, filesize = info.split("|")
+            filesize = int(filesize)
+
+            self.encryptor.send_encrypted_message(self.client_socket, "READY")
+
+            out_path = os.path.join(os.path.expanduser("~"), "Desktop", filename)
+
+            received_bytes = b""
+            while len(received_bytes) < filesize:
+                chunk = self.client_socket.recv(min(4096, filesize - len(received_bytes)))
+                if not chunk:
+                    break
+                received_bytes += chunk
+
+            if len(received_bytes) == filesize:
+                with open(out_path, "wb") as f:
+                    f.write(received_bytes)
+                print("File received successfully")
+            else:
+                print("File incomplete or failed")
+
+            messagebox.showinfo("Purchase", f"You bought {image_name}!\nSaved to Desktop.")
+            frame_widget.destroy()
+            self.render_storage()  # refresh storage page
+
         except Exception as e:
             messagebox.showerror("Error", str(e))
 
@@ -229,10 +282,22 @@ class Client:
         except Exception as e:
             messagebox.showerror("Sell error", str(e))
 
+    def verify_action(self):
+        try:
+            self.encryptor.send_encrypted_message(self.client_socket, "4")
+            resp = self.encryptor.receive_encrypted_message(self.client_socket)
+            if resp == "Enter:":
+                name = simpledialog.askstring(title="Image to verify", prompt="Enter name:")
+                self.encryptor.send_encrypted_message(self.client_socket, name)
+                resp = self.encryptor.receive_encrypted_message(self.client_socket)
+                messagebox.showinfo("Verify", resp)
+        except Exception as e:
+            messagebox.showerror("Verify error", str(e))
+
     def exit_app(self):
         try:
             if self.client_socket:
-                self.encryptor.send_encrypted_message(self.client_socket, "4")
+                self.encryptor.send_encrypted_message(self.client_socket, "5")
                 try:
                     self.encryptor.receive_encrypted_message(self.client_socket)
                 except:

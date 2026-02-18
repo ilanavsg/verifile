@@ -15,6 +15,8 @@ from encrypt import Encryption
 from install_signature import Signature
 from Crypto.Hash import SHA256
 import os
+import io
+import base64
 import json
 
 PRIVATE_KEY = "C:\\Users\\Cyber_User\\Desktop\\verifile\\VerifileProject\\private.pem"
@@ -34,6 +36,7 @@ class Server:
         self.client_listbox = None
         self.bg_image = None
         self.client_details_images = {}
+
 
     def update_gui_log(self, message):
         self.root.after(0, self._update_gui_log, message)
@@ -182,23 +185,114 @@ class Server:
             if 'temp_path' in locals() and os.path.exists(temp_path):
                 os.remove(temp_path)
 
-    def handle_buy_option(self, client_socket):
-        images = self.db_manager.get_all_rows("files") 
+    def handle_buy_option(self, client_socket, user_id):
+        images = self.db_manager.get_all_rows("files")
+        files_dict = {}
+
+        base_dir = r"C:\\Users\\Cyber_User\\Desktop\\verifile\\VerifileProject\\"
+
         for img in images:
-            filename = img[4]
-            price = str(img[11]) 
-            base_dir = r"C:\\Users\\Cyber_User\\Desktop\\verifile\\VerifileProject\\"
-            path = os.path.join(base_dir, filename)
+            stored_filename = img[4]
+            price = float(img[11])
+            path = os.path.join(base_dir, stored_filename)
+
+            thumbnail_b64 = ""
             try:
-                with open(path, "rb") as f:
-                    import base64
-                    data = base64.b64encode(f.read()).decode()
+                with Image.open(path) as im:
+                    im.thumbnail((150, 150))
+                    buf = io.BytesIO()
+                    im.save(buf, format="PNG")
+                    thumbnail_b64 = base64.b64encode(buf.getvalue()).decode()
+            except Exception as e:
+                print(f"Error loading {stored_filename}: {e}")
+
+            self.encryptor.send_encrypted_message(client_socket, stored_filename)
+            self.encryptor.send_encrypted_message(client_socket, str(price))
+            self.encryptor.send_encrypted_message(client_socket, thumbnail_b64)
+
+            files_dict[stored_filename] = (path, price, img[1])  # img[2] is owner in files table
+
+        # signal end of list
+        self.encryptor.send_encrypted_message(client_socket, "")
+
+        # handle purchase request
+        server_msg = self.encryptor.receive_encrypted_message(client_socket)
+        if not server_msg:
+            return
+
+        parts = server_msg.split(":", 1)
+        if len(parts) != 2 or parts[0] != "BUY" or parts[1] not in files_dict:
+            self.encryptor.send_encrypted_message(client_socket, "FAILED")
+            return
+
+        full_path, price, original_owner = files_dict[parts[1]]
+
+        # --- fetch buyer balance manually (cannot use get_column_values_by_id) ---
+        cursor = self.db_manager.conn.cursor()
+        cursor.execute("SELECT balance FROM clients WHERE user_id = %s", (user_id,))
+        balance_rows = cursor.fetchall()
+        if not balance_rows:
+            self.encryptor.send_encrypted_message(client_socket, "FAILED: no balance")
+            return
+
+        balance = balance_rows[0][0]
+        if balance < price:
+            self.encryptor.send_encrypted_message(client_socket, "FAILED: insufficient funds")
+            return
+
+        # deduct price from buyer
+        new_balance = balance - price
+        self.db_manager.update_row("clients", "user_id", user_id, ["balance"], [new_balance])
+
+        # optionally add money to seller
+        if original_owner:
+            # here we can use get_column_values_by_id because it's from files table
+            owner_rows = self.db_manager.get_column_values_by_user_id("clients", "balance", original_owner)
+            if owner_rows:
+                owner_balance = owner_rows[0][0]
+                self.db_manager.update_row("clients", "user_id", original_owner, ["balance"], [owner_balance + price])
+
+        # transfer ownership and mark sold
+        self.db_manager.update_row(
+            "files",
+            "stored_filename",
+            parts[1],
+            ["owner_id", "status"],
+            [user_id, "sold"]
+        )
+
+        # send full file to buyer
+        try:
+            self.encryptor.send_encrypted_message(client_socket, "SUCCESS")
+            self.send_file_to_client(client_socket, full_path)
+
+        except Exception as e:
+            print(f"Error sending file {full_path}: {e}")
+            self.encryptor.send_encrypted_message(client_socket, "FAILED")
+
+    def send_file_to_client(self, client_socket, full_path):
+        try:
+            filesize = os.path.getsize(full_path)
+            filename = os.path.basename(full_path)
+
+            # Tell client to expect file
+            self.encryptor.send_encrypted_message(client_socket, f"{filename}|{filesize}")
+            ack = self.encryptor.receive_encrypted_message(client_socket)
+            if ack != "READY":
+                print("Client not ready")
+                return
+
+            # Send file in chunks
+            with open(full_path, "rb") as f:
+                while chunk := f.read(4096):
+                    client_socket.sendall(chunk)
+
+        except Exception as e:
+            print(f"Error sending file {full_path}: {e}")
+            try:
+                self.encryptor.send_encrypted_message(client_socket, "FAILED")
             except:
-                data = ""
-            self.encryptor.send_encrypted_message(client_socket, filename)
-            self.encryptor.send_encrypted_message(client_socket, price)
-            self.encryptor.send_encrypted_message(client_socket, data)
-        self.encryptor.send_encrypted_message(client_socket, "") 
+                pass
 
     def handle_options(self, client_socket, user_id):
         while True:
@@ -213,11 +307,16 @@ class Server:
                     self.handle_upload_for_signature(client_socket, user_id)
                 elif cmd == "2":
                     self.update_gui_log(f"Client {user_id} chose option BUY.")
-                    self.handle_buy_option(client_socket)
+                    self.handle_buy_option(client_socket, user_id)
                 elif cmd == "3":
                     self.update_gui_log(f"Client {user_id} chose option SELL.")
                     self.encryptor.send_encrypted_message(client_socket, "SELL flow not implemented yet.")
                 elif cmd == "4":
+                    self.update_gui_log(f"Client {user_id} chose option Verify")
+                    self.encryptor.send_encrypted_message(client_socket, "Enter:")
+                    img = self.encryptor.receive_encrypted_message(client_socket)
+                    self.encryptor.send_encrypted_message(client_socket, "working on it....")
+                elif cmd == "5":
                     self.encryptor.send_encrypted_message(client_socket, "Goodbye!")
                     self.update_gui_log(f"Client {user_id} disconnected.")
                     break

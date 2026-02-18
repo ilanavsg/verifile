@@ -83,6 +83,7 @@ def create_main_menu(client, parent):
     create_button("Upload", client.upload_action)
     create_button("Buy", client.buy_action)
     create_button("Sell", client.sell_action)
+    create_button("Verify", client.verify_action)
     create_button("My Storage", lambda: client.show_page("storage_page"))
     create_button("Exit", client.exit_app, color=EXIT_BG, hover_color=EXIT_HOVER)
 
