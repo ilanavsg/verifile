@@ -1,6 +1,9 @@
 # Ilana Ben Guy
 # Project VeriFile
-from ui import run_server_ui
+import tkinter as tk
+from tkinter import Label, scrolledtext, Toplevel, Listbox, Button
+from PIL import Image, ImageTk
+import time
 import socket
 import threading
 from datetime import datetime
@@ -24,6 +27,97 @@ class Server:
         create_all_tables(self.db_manager)
         self.encryptor = Encryption()
         print(f"{CYAN}{BOLD} Database connected and tables verified.{RESET}")
+        # Initialize GUI components
+        self.root = tk.Tk()
+        self.root.withdraw()
+        self.log_text = None
+        self.client_listbox = None
+        self.bg_image = None
+        self.client_details_images = {}
+
+    def update_gui_log(self, message):
+        self.root.after(0, self._update_gui_log, message)
+
+    def _update_gui_log(self, message):
+        self.log_text.config(state=tk.NORMAL)
+        self.log_text.insert(tk.END, message + "\n")
+        self.log_text.config(state=tk.DISABLED)
+        self.log_text.yview(tk.END)
+
+    def update_client_list(self):
+        self.root.after(0, self._update_client_list)
+
+    def _update_client_list(self):
+        self.client_listbox.delete(0, tk.END)
+        clients = self.db_manager.get_all_rows("clients")
+        for client in clients:
+            self.client_listbox.insert(tk.END, client[0])
+
+    def show_client_details(self, client_id):
+        client_data = self.db_manager.get_rows_with_value("clients", "client_id", client_id)
+        if not client_data:
+            return
+        client = client_data[0]
+
+        details_window = Toplevel()
+        details_window.title(f"Client {client_id} Details")
+        details_window.geometry("400x350")
+
+        # Create and store image reference in the window itself to prevent garbage collection
+        bg_image = ImageTk.PhotoImage(Image.open(r"C:\Users\Cyber_User\Downloads\masker\alin\logo_cyber.jpeg"))
+        bg_label = Label(details_window, image=bg_image)
+        bg_label.image = bg_image  # Keep a reference to prevent garbage collection
+        bg_label.place(relwidth=1, relheight=1)
+
+        details = [
+            f"ID: {client[0]}",
+            f"IP: {client[1]}",
+            f"Port: {client[2]}",
+            f"Last Seen: {client[3]}",
+            f"Total Actions: {client[5]}",
+            f"Status: {'Existing' if client[5] > 0 else 'New'}"
+        ]
+
+        for detail in details:
+            lbl = Label(details_window, text=detail, fg='white', bg='black')
+            lbl.pack(anchor="w", padx=10, pady=2)
+
+        history_button = Button(details_window, text="History", command=lambda: self.show_client_history(client_id), bg='gray', fg='white')
+        history_button.pack(pady=10)
+
+    def show_client_history(self, client_id):
+        history_window = Toplevel()
+        history_window.title(f"Client {client_id} - History")
+        history_window.geometry("600x400")
+
+        # Create and store image reference in the window itself
+        bg_image = ImageTk.PhotoImage(Image.open(r"C:\Users\Cyber_User\Downloads\masker\alin\logo_cyber.jpeg"))
+        bg_label = Label(history_window, image=bg_image)
+        bg_label.image = bg_image  # Keep a reference to prevent garbage collection
+        bg_label.place(relwidth=1, relheight=1)
+
+        history_label = Label(history_window, text=f"Client {client_id} Image History", font=("Arial", 12, "bold"), fg="white", bg="black")
+        history_label.pack(pady=5)
+
+        image_listbox = Listbox(history_window, height=15, width=80, bg="black", fg="white", selectbackground="gray")
+        image_listbox.pack(padx=10, pady=5, expand=True, fill="both")
+
+        images = self.db_manager.get_rows_with_value("decrypted_media", "user_id", client_id)
+
+        if not images:
+            image_listbox.insert(tk.END, "No images found for this client.")
+        else:
+            image_paths = [img[2] for img in images]
+            for path in image_paths:
+                image_listbox.insert(tk.END, path)
+
+            def open_selected_image(event):
+                selected_index = image_listbox.curselection()
+                if selected_index:
+                    selected_path = image_paths[selected_index[0]]
+                    os.system(f'"{selected_path}"')
+
+            image_listbox.bind("<Double-Button-1>", open_selected_image)
 
     def image_hash_exists(self, hash_hex):
         existing = self.db_manager.get_rows_with_value("files", "hash_value", hash_hex)
@@ -115,21 +209,25 @@ class Server:
                 cmd = cmd.strip()
 
                 if cmd == "1":
+                    self.update_gui_log(f"Client {user_id} chose option UPLOAD.")
                     self.handle_upload_for_signature(client_socket, user_id)
                 elif cmd == "2":
+                    self.update_gui_log(f"Client {user_id} chose option BUY.")
                     self.handle_buy_option(client_socket)
                 elif cmd == "3":
+                    self.update_gui_log(f"Client {user_id} chose option SELL.")
                     self.encryptor.send_encrypted_message(client_socket, "SELL flow not implemented yet.")
                 elif cmd == "4":
                     self.encryptor.send_encrypted_message(client_socket, "Goodbye!")
+                    self.update_gui_log(f"Client {user_id} disconnected.")
                     break
                 else:
                     self.encryptor.send_encrypted_message(client_socket, "Invalid option.")
             except ConnectionResetError:
-                print(f"{YELLOW}Client disconnected abruptly.{RESET}")
+                self.update_gui_log(f"{YELLOW}Client disconnected abruptly.{RESET}")
                 break
             except Exception as e:
-                print(f"{RED}Options error: {e}{RESET}")
+                self.update_gui_log(f"{RED}Options error: {e}{RESET}")
                 break
 
     def handle_client(self, client_socket):
@@ -144,18 +242,20 @@ class Server:
 
             existing = self.db_manager.get_rows_with_value("clients", "client_username", username)
             if existing:
+                user_id = existing[0][0]
                 db_password = existing[0][4]
                 if bcrypt.checkpw(password.encode(), db_password.encode()):
-                    user_id = existing[0][0]
                     self.encryptor.send_encrypted_message(client_socket, "WELCOME BACK")
+                    client_status = "EXISTING"
                     self.encryptor.send_encrypted_message(client_socket, str(user_id))
                     all_works = self.db_manager.get_column_values_by_id("files", "stored_filename", user_id)
                     all_works = [work[0] for work in all_works]
                     payload = json.dumps(all_works)
                     self.encryptor.send_encrypted_message(client_socket, f"WORKS:{payload}")
-                    self.handle_options(client_socket, user_id)
                 else:
                     self.encryptor.send_encrypted_message(client_socket, "AUTH FAILED")
+                    client_status = "AUTH FAILED"
+                    self.update_gui_log(f"Client {user_id} connected - Status: {client_status}")
             else:
                 hashed = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
                 ip, port = client_socket.getpeername()
@@ -167,25 +267,76 @@ class Server:
                 )
                 user_id = self.db_manager.get_rows_with_value("clients", "client_username", username)[0][0]
                 self.encryptor.send_encrypted_message(client_socket, "NEW USER REGISTERED")
+                client_status = "NEW"
                 self.encryptor.send_encrypted_message(client_socket, str(user_id))
                 all_works = self.db_manager.get_column_values_by_id("files", "stored_filename", user_id)
                 all_works = [work[0] for work in all_works]
                 payload = json.dumps(all_works)
                 self.encryptor.send_encrypted_message(client_socket, f"WORKS:{payload}")
-                self.handle_options(client_socket, user_id)
+
+            self.update_gui_log(f"Client {user_id} connected - Status: {client_status}")
+            self.update_client_list()
+            self.handle_options(client_socket, user_id)
+
         except Exception as e:
-            print(f"{RED}Client handler error: {e}{RESET}")
+            self.update_gui_log(f"{RED}Client handler error: {e}{RESET}")
         finally:
             try:
                 client_socket.close()
+                self.update_client_list()
             except:
                 pass
+
+    def create_gui(self):
+        # Create splash screen
+        splash = Toplevel()
+        splash.geometry("400x400")
+        splash.overrideredirect(True)
+
+        # Load and keep reference to splash image
+        logo = Image.open(r"C:\Users\Cyber_User\Downloads\VerifileLogo.png").resize((400, 400)) #new pic
+        logo_photo = ImageTk.PhotoImage(logo)
+        label = Label(splash, image=logo_photo)
+        label.image = logo_photo  # Keep reference
+        label.pack()
+
+        splash.update()
+        time.sleep(4)
+        splash.destroy()
+
+        # Destroy the initial withdrawn root and create a new one
+        self.root.destroy()
+        self.root = tk.Tk()
+        self.root.title("Server GUI")
+        self.root.geometry("500x500")
+
+        # Load and keep reference to background image
+        self.bg_image = ImageTk.PhotoImage(Image.open(r"C:\Users\Cyber_User\Downloads\Background.png")) #new img
+        bg_label = Label(self.root, image=self.bg_image)
+        bg_label.place(relwidth=1, relheight=1)
+
+        # Create scrolled text for logs
+        self.log_text = scrolledtext.ScrolledText(self.root, state=tk.DISABLED, wrap=tk.WORD, height=10, bg='black', fg='white')
+        self.log_text.pack(expand=True, fill='both', padx=10, pady=5)
+
+        # Create clients label
+        Label(self.root, text="VeriFile Customers", font=("Arial", 14, "bold"), fg="white", bg="black").pack(pady=5)
+
+        # Create client listbox
+        self.client_listbox = Listbox(self.root, bg='black', fg='white')
+        self.client_listbox.pack(expand=True, fill='both', padx=10, pady=5)
+        self.client_listbox.bind("<Double-Button-1>", lambda event: self.show_client_details(self.client_listbox.get(self.client_listbox.curselection())))
+
+        # Start server in a separate thread
+        threading.Thread(target=self.start_server, daemon=True).start()
+        self.root.mainloop()
 
     def start_server(self):
         server_socket = socket.socket()
         server_socket.bind((IP, PORT))
         server_socket.listen()
-        print(f"{CYAN}Server running on {IP}:{PORT}{RESET}")
+        self.update_gui_log("Server started...")
+        self.update_gui_log(f"Server running on {IP}:{PORT}")
         connections = {}
         total_connections = 0
         while True:
@@ -197,15 +348,15 @@ class Server:
             if rows:
                 ddos_status = rows[0][7]
                 if ddos_status and ip != '127.0.0.1':
-                    print(f"{RED}Blocked IP tried to connect: {ip}{RESET}")
+                    self.update_gui_log(f"{RED}Blocked IP tried to connect: {ip}{RESET}")
                     client_socket.close()
                     continue
             if total_connections >= MAX_TOTAL_CONNECTIONS:
-                print(f"{RED}Max total connections reached{RESET}")
+                self.update_gui_log(f"{RED}Max total connections reached{RESET}")
                 client_socket.close()
                 continue
             if len(connections[ip]) >= MAX_CONNECTIONS_PER_IP:
-                print(f"{RED}DDOS detected from IP {ip}{RESET}")
+                self.update_gui_log(f"{RED}DDOS detected from IP {ip}{RESET}")
                 for sock in connections[ip]:
                     sock.close()
                 connections[ip].clear()
@@ -222,16 +373,10 @@ class Server:
                 continue
             connections[ip].append(client_socket)
             total_connections += 1
-            print(f"{GREEN}Client connected: {addr}{RESET}")
+            self.update_gui_log(f"Client connected: {addr}")
             threading.Thread(target=self.handle_client, args=(client_socket,), daemon=True).start()
 
 
 if __name__ == "__main__":
     server = Server()
-
-    threading.Thread(
-        target=run_server_ui,
-        daemon=True
-    ).start()
-
-    server.start_server()
+    server.create_gui()
