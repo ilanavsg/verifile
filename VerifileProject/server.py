@@ -56,7 +56,7 @@ class Server:
             self.client_listbox.insert(tk.END, client[0])
 
     def show_client_details(self, client_id):
-        client_data = self.db_manager.get_rows_with_value("clients", "client_id", client_id)
+        client_data = self.db_manager.get_rows_with_value("clients", "user_id", client_id)
         if not client_data:
             return
         client = client_data[0]
@@ -65,19 +65,12 @@ class Server:
         details_window.title(f"Client {client_id} Details")
         details_window.geometry("400x350")
 
-        # Create and store image reference in the window itself to prevent garbage collection
-        bg_image = ImageTk.PhotoImage(Image.open(r"C:\Users\Cyber_User\Downloads\masker\alin\logo_cyber.jpeg"))
-        bg_label = Label(details_window, image=bg_image)
-        bg_label.image = bg_image  # Keep a reference to prevent garbage collection
-        bg_label.place(relwidth=1, relheight=1)
-
         details = [
             f"ID: {client[0]}",
             f"IP: {client[1]}",
             f"Port: {client[2]}",
-            f"Last Seen: {client[3]}",
-            f"Total Actions: {client[5]}",
-            f"Status: {'Existing' if client[5] > 0 else 'New'}"
+            f"Last Seen: {client[6]}",
+            f"Balance: {client[9]}"
         ]
 
         for detail in details:
@@ -92,31 +85,24 @@ class Server:
         history_window.title(f"Client {client_id} - History")
         history_window.geometry("600x400")
 
-        # Create and store image reference in the window itself
-        bg_image = ImageTk.PhotoImage(Image.open(r"C:\Users\Cyber_User\Downloads\masker\alin\logo_cyber.jpeg"))
-        bg_label = Label(history_window, image=bg_image)
-        bg_label.image = bg_image  # Keep a reference to prevent garbage collection
-        bg_label.place(relwidth=1, relheight=1)
-
         history_label = Label(history_window, text=f"Client {client_id} Image History", font=("Arial", 12, "bold"), fg="white", bg="black")
         history_label.pack(pady=5)
 
         image_listbox = Listbox(history_window, height=15, width=80, bg="black", fg="white", selectbackground="gray")
         image_listbox.pack(padx=10, pady=5, expand=True, fill="both")
 
-        images = self.db_manager.get_rows_with_value("decrypted_media", "user_id", client_id)
+        images = self.db_manager.get_my_works(client_id)
 
         if not images:
             image_listbox.insert(tk.END, "No images found for this client.")
         else:
-            image_paths = [img[2] for img in images]
-            for path in image_paths:
-                image_listbox.insert(tk.END, path)
+            for img in images:
+                image_listbox.insert(tk.END, img)
 
             def open_selected_image(event):
                 selected_index = image_listbox.curselection()
                 if selected_index:
-                    selected_path = image_paths[selected_index[0]]
+                    selected_path = images[selected_index[0]]
                     os.system(f'"{selected_path}"')
 
             image_listbox.bind("<Double-Button-1>", open_selected_image)
@@ -525,11 +511,6 @@ class Server:
         self.root = tk.Tk()
         self.root.title("Server GUI")
         self.root.geometry("500x500")
-
-        # Load and keep reference to background image
-        self.bg_image = ImageTk.PhotoImage(Image.open(r"C:\Users\Cyber_User\Downloads\Background.png")) #new img
-        bg_label = Label(self.root, image=self.bg_image)
-        bg_label.place(relwidth=1, relheight=1)
 
         # Create scrolled text for logs
         self.log_text = scrolledtext.ScrolledText(self.root, state=tk.DISABLED, wrap=tk.WORD, height=10, bg='black', fg='white')
