@@ -37,7 +37,6 @@ class Server:
         self.bg_image = None
         self.client_details_images = {}
 
-
     def update_gui_log(self, message):
         self.root.after(0, self._update_gui_log, message)
 
@@ -186,14 +185,15 @@ class Server:
                 os.remove(temp_path)
 
     def handle_buy_option(self, client_socket, user_id):
-        images = self.db_manager.get_all_rows("files")
+        foreign_works = self.db_manager.get_available_foreign_works(user_id)
         files_dict = {}
 
         base_dir = r"C:\\Users\\Cyber_User\\Desktop\\verifile\\VerifileProject\\"
 
-        for img in images:
-            stored_filename = img[4]
-            price = float(img[11])
+        # Send available files to client
+        for file_id, owner_id, filename, price in foreign_works:
+            stored_filename = filename
+            price = price
             path = os.path.join(base_dir, stored_filename)
 
             thumbnail_b64 = ""
@@ -210,65 +210,64 @@ class Server:
             self.encryptor.send_encrypted_message(client_socket, str(price))
             self.encryptor.send_encrypted_message(client_socket, thumbnail_b64)
 
-            files_dict[stored_filename] = (path, price, img[1])  # img[2] is owner in files table
+            files_dict[stored_filename] = (path, price, owner_id)
 
-        # signal end of list
+        # Signal end of list
         self.encryptor.send_encrypted_message(client_socket, "")
 
-        # handle purchase request
+        # Receive purchase request
         server_msg = self.encryptor.receive_encrypted_message(client_socket)
         if not server_msg:
-            return
+            return  # client didn't send anything, ignore
 
         parts = server_msg.split(":", 1)
-        if len(parts) != 2 or parts[0] != "BUY" or parts[1] not in files_dict:
-            self.encryptor.send_encrypted_message(client_socket, "FAILED")
-            return
+        if parts[0] == "BUY" and parts[1] in files_dict:
 
-        full_path, price, original_owner = files_dict[parts[1]]
+            full_path, price, original_owner = files_dict[parts[1]]
 
-        # --- fetch buyer balance manually (cannot use get_column_values_by_id) ---
-        cursor = self.db_manager.conn.cursor()
-        cursor.execute("SELECT balance FROM clients WHERE user_id = %s", (user_id,))
-        balance_rows = cursor.fetchall()
-        if not balance_rows:
-            self.encryptor.send_encrypted_message(client_socket, "FAILED: no balance")
-            return
+            # Fetch buyer balance
+            cursor = self.db_manager.conn.cursor()
+            cursor.execute("SELECT balance FROM clients WHERE user_id = %s", (user_id,))
+            balance_rows = cursor.fetchall()
+            if not balance_rows:
+                self.encryptor.send_encrypted_message(client_socket, "FAILED: no balance")
+                return
 
-        balance = balance_rows[0][0]
-        if balance < price:
-            self.encryptor.send_encrypted_message(client_socket, "FAILED: insufficient funds")
-            return
+            balance = balance_rows[0][0]
+            if balance < price:
+                self.encryptor.send_encrypted_message(client_socket, "FAILED: insufficient funds")
+                return
 
-        # deduct price from buyer
-        new_balance = balance - price
-        self.db_manager.update_row("clients", "user_id", user_id, ["balance"], [new_balance])
+            # Deduct price from buyer
+            new_balance = balance - price
+            self.db_manager.update_row("clients", "user_id", user_id, ["balance"], [new_balance])
 
-        # optionally add money to seller
-        if original_owner:
-            # here we can use get_column_values_by_id because it's from files table
-            owner_rows = self.db_manager.get_column_values_by_user_id("clients", "balance", original_owner)
-            if owner_rows:
-                owner_balance = owner_rows[0][0]
-                self.db_manager.update_row("clients", "user_id", original_owner, ["balance"], [owner_balance + price])
+            # Add money to seller if applicable
+            if original_owner:
+                owner_rows = self.db_manager.get_column_values_by_user_id("clients", "balance", original_owner)
+                if owner_rows:
+                    owner_balance = owner_rows[0][0]
+                    self.db_manager.update_row("clients", "user_id", original_owner, ["balance"], [owner_balance + price])
 
-        # transfer ownership and mark sold
-        self.db_manager.update_row(
-            "files",
-            "stored_filename",
-            parts[1],
-            ["owner_id", "status"],
-            [user_id, "sold"]
-        )
+            # Transfer ownership and mark sold
+            self.db_manager.update_row(
+                "files",
+                "stored_filename",
+                parts[1],
+                ["owner_id", "status"],
+                [user_id, "sold"]
+            )
 
-        # send full file to buyer
-        try:
-            self.encryptor.send_encrypted_message(client_socket, "SUCCESS")
-            self.send_file_to_client(client_socket, full_path)
+            # Send full file to buyer
+            try:
+                self.encryptor.send_encrypted_message(client_socket, "SUCCESS")
+                self.send_file_to_client(client_socket, full_path)
+            except Exception as e:
+                print(f"Error sending file {full_path}: {e}")
+                self.encryptor.send_encrypted_message(client_socket, f"FAILED: {e}")
 
-        except Exception as e:
-            print(f"Error sending file {full_path}: {e}")
-            self.encryptor.send_encrypted_message(client_socket, "FAILED")
+        else:
+            self.encryptor.send_encrypted_message(client_socket, "")
 
     def send_file_to_client(self, client_socket, full_path):
         try:
@@ -294,6 +293,129 @@ class Server:
             except:
                 pass
 
+    def handle_sell_action(self, client_socket, user_id):
+        temp_path = None
+        try:
+            user_rows = self.db_manager.get_rows_with_value("clients", "user_id", user_id)
+            if not user_rows:
+                self.encryptor.send_encrypted_message(client_socket, "ERROR: User not found")
+                return
+
+            self.encryptor.send_encrypted_message(client_socket, "SEND_IMAGE")
+            filename = self.encryptor.receive_encrypted_message(client_socket)
+            size = int(self.encryptor.receive_encrypted_message(client_socket))
+            self.encryptor.send_encrypted_message(client_socket, "READY")
+
+            existing_files = self.db_manager.get_rows_with_value("files", "stored_filename", filename)
+            for f in existing_files:
+                if f[1] == user_id and f[-1] == "available":
+                    self.encryptor.send_encrypted_message(client_socket, "ERROR: This file is already on sale")
+                    return
+
+            img_bytes = b""
+            while len(img_bytes) < size:
+                img_bytes += client_socket.recv(4096)
+
+            temp_path = f"sell_{filename}"
+            with open(temp_path, "wb") as f:
+                f.write(img_bytes)
+
+            hash_hex = SHA256.new(img_bytes).hexdigest()
+            verifier = Signature(temp_path, None, PUBLIC_KEY)
+            verified, msg = verifier.verify_signature(temp_path)
+            signature_hex = Image.open(temp_path).info.get("Signature")
+
+            self.db_manager.insert_row(
+                "history_table",
+                "(file_id, user_id, action, hash_value, signature, verified, created_at)",
+                "(?,?,?,?,?,?,?)",
+                (None, user_id, "verify", hash_hex, signature_hex, verified, datetime.now())
+            )
+
+            if not verified:
+                self.encryptor.send_encrypted_message(client_socket, "FAILED")
+                self.encryptor.send_encrypted_message(client_socket, "Image not signed or signature invalid")
+                return
+
+            price = self.encryptor.receive_encrypted_message(client_socket)
+
+            self.db_manager.update_row(
+                "files",
+                "stored_filename",
+                filename,
+                ["owner_id", "price", "status", "upload_date", "hash_value", "signature"],
+                [user_id, price, "available", datetime.now(), hash_hex, "embedded"]
+            )
+
+            self.db_manager.update_row(
+                "clients",
+                "user_id",
+                user_id,
+                ["role"],
+                ["seller"]
+            )
+
+            self.encryptor.send_encrypted_message(client_socket, "SUCCESS")
+            self.encryptor.send_encrypted_message(client_socket, "Verified and relisted successfully")
+
+        except Exception as e:
+            self.encryptor.send_encrypted_message(client_socket, f"ERROR: {e}")
+            self.encryptor.send_encrypted_message(client_socket, "An error occured")
+        finally:
+            if temp_path and os.path.exists(temp_path):
+                os.remove(temp_path)
+
+    def handle_verify_action(self, client_socket, user_id):
+        temp_path = None
+        try:
+            self.encryptor.send_encrypted_message(client_socket, "SEND_IMAGE")
+            filename = self.encryptor.receive_encrypted_message(client_socket)
+            size = int(self.encryptor.receive_encrypted_message(client_socket))
+
+            self.encryptor.send_encrypted_message(client_socket, "READY")
+            img_bytes = b""
+            while len(img_bytes) < size:
+                img_bytes += client_socket.recv(4096)
+
+            temp_path = f"verify_{filename}"
+            with open(temp_path, "wb") as f:
+                f.write(img_bytes)
+            # hash
+            hash_hex = SHA256.new(img_bytes).hexdigest()
+            # verify signature
+            verifier = Signature(temp_path, None, PUBLIC_KEY)
+            verified, msg = verifier.verify_signature(temp_path)
+            # try to resolve file_id (optional but ideal)
+            rows = self.db_manager.get_rows_with_value("files", "hash_value", hash_hex)
+            file_id = rows[0][0] if rows else None
+            signature_hex = Image.open(temp_path).info.get("Signature")
+            self.db_manager.insert_row(
+                "history_table",
+                "(file_id, user_id, action, hash_value, signature, verified, created_at)",
+                "(%s,%s,%s,%s,%s,%s,%s)",
+                (
+                    file_id,
+                    user_id,
+                    "verify",
+                    hash_hex,
+                    signature_hex,
+                    verified,
+                    datetime.now()
+                )
+            )
+
+            self.encryptor.send_encrypted_message(
+                client_socket,
+                "VALID" if verified else "INVALID"
+            )
+            self.encryptor.send_encrypted_message(client_socket, msg)
+
+        except Exception as e:
+            self.encryptor.send_encrypted_message(client_socket, f"ERROR: {e}")
+        finally:
+            if temp_path and os.path.exists(temp_path):
+                os.remove(temp_path)
+
     def handle_options(self, client_socket, user_id):
         while True:
             try:
@@ -310,12 +432,10 @@ class Server:
                     self.handle_buy_option(client_socket, user_id)
                 elif cmd == "3":
                     self.update_gui_log(f"Client {user_id} chose option SELL.")
-                    self.encryptor.send_encrypted_message(client_socket, "SELL flow not implemented yet.")
+                    self.handle_sell_action(client_socket, user_id)
                 elif cmd == "4":
                     self.update_gui_log(f"Client {user_id} chose option Verify")
-                    self.encryptor.send_encrypted_message(client_socket, "Enter:")
-                    img = self.encryptor.receive_encrypted_message(client_socket)
-                    self.encryptor.send_encrypted_message(client_socket, "working on it....")
+                    self.handle_verify_action(client_socket, user_id)
                 elif cmd == "5":
                     self.encryptor.send_encrypted_message(client_socket, "Goodbye!")
                     self.update_gui_log(f"Client {user_id} disconnected.")
@@ -323,10 +443,10 @@ class Server:
                 else:
                     self.encryptor.send_encrypted_message(client_socket, "Invalid option.")
             except ConnectionResetError:
-                self.update_gui_log(f"{YELLOW}Client disconnected abruptly.{RESET}")
+                self.update_gui_log(f"Client disconnected abruptly.")
                 break
             except Exception as e:
-                self.update_gui_log(f"{RED}Options error: {e}{RESET}")
+                self.update_gui_log(f"Options error: {e}")
                 break
 
     def handle_client(self, client_socket):
@@ -344,11 +464,9 @@ class Server:
                 user_id = existing[0][0]
                 db_password = existing[0][4]
                 if bcrypt.checkpw(password.encode(), db_password.encode()):
-                    self.encryptor.send_encrypted_message(client_socket, "WELCOME BACK")
                     client_status = "EXISTING"
                     self.encryptor.send_encrypted_message(client_socket, str(user_id))
-                    all_works = self.db_manager.get_column_values_by_id("files", "stored_filename", user_id)
-                    all_works = [work[0] for work in all_works]
+                    all_works = self.db_manager.get_my_works(user_id)
                     payload = json.dumps(all_works)
                     self.encryptor.send_encrypted_message(client_socket, f"WORKS:{payload}")
                 else:
@@ -368,8 +486,7 @@ class Server:
                 self.encryptor.send_encrypted_message(client_socket, "NEW USER REGISTERED")
                 client_status = "NEW"
                 self.encryptor.send_encrypted_message(client_socket, str(user_id))
-                all_works = self.db_manager.get_column_values_by_id("files", "stored_filename", user_id)
-                all_works = [work[0] for work in all_works]
+                all_works = self.db_manager.get_my_works(user_id)
                 payload = json.dumps(all_works)
                 self.encryptor.send_encrypted_message(client_socket, f"WORKS:{payload}")
 
@@ -378,7 +495,7 @@ class Server:
             self.handle_options(client_socket, user_id)
 
         except Exception as e:
-            self.update_gui_log(f"{RED}Client handler error: {e}{RESET}")
+            self.update_gui_log(f"Client handler error: {e}")
         finally:
             try:
                 client_socket.close()

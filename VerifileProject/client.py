@@ -56,13 +56,13 @@ class Client:
         self.encryptor.send_encrypted_message(self.client_socket, password)
         self.encryptor.send_encrypted_message(self.client_socket, email)
         self.encryptor.send_encrypted_message(self.client_socket, role)
-        resp1 = self.encryptor.receive_encrypted_message(self.client_socket)
         resp2 = self.encryptor.receive_encrypted_message(self.client_socket)
         if resp2:
             self.client_id = int(resp2)
         resp3 = self.encryptor.receive_encrypted_message(self.client_socket)
-        cmd, data = resp3.split(":", 1)
-        if cmd == "WORKS":
+        print(resp3)
+        if resp3.startswith("WORKS:"):
+            cmd, data = resp3.split(":", 1)
             self.my_works = json.loads(data)
 
     def show_login_window(self):
@@ -127,6 +127,51 @@ class Client:
         self.pages[page_name].pack(fill="both", expand=True)
         if page_name == "storage_page":
             self.render_storage()
+
+    def render_storage(self):
+        if not self.storage_list_frame:
+            return
+
+        for widget in self.storage_list_frame.winfo_children():
+            widget.destroy()
+
+        for work in self.my_works:
+            item = tk.Frame(
+                self.storage_list_frame,
+                bg="#ffe6f0",
+                bd=1,
+                relief="ridge"
+            )
+            item.pack(padx=5, pady=5, fill="x")
+
+            tk.Label(
+                item,
+                text=work,
+                bg="#ffe6f0"
+            ).pack(side="left", padx=10)
+
+    def upload_action(self):
+        try:
+            self.encryptor.send_encrypted_message(self.client_socket, "1")
+            server_msg = self.encryptor.receive_encrypted_message(self.client_socket)
+            if server_msg:
+                messagebox.showinfo("Server", server_msg)
+            path = filedialog.askopenfilename(filetypes=[("Images", "*.png *.jpg *.jpeg")])
+            if not path:
+                return
+            self.send_image_bytes(path)
+            price = simpledialog.askstring(title="Set Price", prompt="Enter price:")
+            if not price or not price.replace('.', '', 1).isdigit():
+                messagebox.showerror("Invalid price", "Please enter a valid number.")
+                return
+
+            self.encryptor.send_encrypted_message(self.client_socket, price)
+            resp1 = self.encryptor.receive_encrypted_message(self.client_socket)
+            if resp1:
+                messagebox.showinfo("Result", resp1)
+
+        except Exception as e:
+            messagebox.showerror("Upload error", str(e))
 
     def buy_action(self):
         try:
@@ -228,69 +273,73 @@ class Client:
         except Exception as e:
             messagebox.showerror("Error", str(e))
 
-    def render_storage(self):
-        if not self.storage_list_frame:
-            return
-
-        for widget in self.storage_list_frame.winfo_children():
-            widget.destroy()
-
-        for work in self.my_works:
-            item = tk.Frame(
-                self.storage_list_frame,
-                bg="#ffe6f0",
-                bd=1,
-                relief="ridge"
-            )
-            item.pack(padx=5, pady=5, fill="x")
-
-            tk.Label(
-                item,
-                text=work,
-                bg="#ffe6f0"
-            ).pack(side="left", padx=10)
-
-    def upload_action(self):
-        try:
-            self.encryptor.send_encrypted_message(self.client_socket, "1")
-            server_msg = self.encryptor.receive_encrypted_message(self.client_socket)
-            if server_msg:
-                messagebox.showinfo("Server", server_msg)
-            path = filedialog.askopenfilename(filetypes=[("Images", "*.png *.jpg *.jpeg")])
-            if not path:
-                return
-            self.send_image_bytes(path)
-            price = simpledialog.askstring(title="Set Price", prompt="Enter price:")
-            if not price or not price.replace('.', '', 1).isdigit():
-                messagebox.showerror("Invalid price", "Please enter a valid number.")
-                return
-
-            self.encryptor.send_encrypted_message(self.client_socket, price)
-            resp1 = self.encryptor.receive_encrypted_message(self.client_socket)
-            if resp1:
-                messagebox.showinfo("Result", resp1)
-
-        except Exception as e:
-            messagebox.showerror("Upload error", str(e))
-
     def sell_action(self):
         try:
             self.encryptor.send_encrypted_message(self.client_socket, "3")
-            resp = self.encryptor.receive_encrypted_message(self.client_socket)
-            if resp:
-                messagebox.showinfo("Sell", resp)
+            cmd = self.encryptor.receive_encrypted_message(self.client_socket)
+
+            if cmd != "SEND_IMAGE":
+                return
+
+            path = filedialog.askopenfilename(filetypes=[("Images", "*.png *.jpg *jpeg")])
+            if not path:
+                return
+
+            filename = os.path.basename(path)
+            data = open(path, "rb").read()
+            price = simpledialog.askstring("Sell Image", "Enter price:")
+            if not price:
+                return
+            
+            self.encryptor.send_encrypted_message(self.client_socket, filename)
+            self.encryptor.send_encrypted_message(self.client_socket, str(len(data)))
+            self.encryptor.receive_encrypted_message(self.client_socket)
+            self.client_socket.sendall(data)
+            self.encryptor.send_encrypted_message(self.client_socket, price)
+            result = self.encryptor.receive_encrypted_message(self.client_socket)
+            msg = self.encryptor.receive_encrypted_message(self.client_socket)
+
+            if result == "SUCCESS":
+                messagebox.showinfo("Sell Result", msg)
+            else:
+                messagebox.showerror("Sell Error", msg)
+
         except Exception as e:
             messagebox.showerror("Sell error", str(e))
 
     def verify_action(self):
         try:
             self.encryptor.send_encrypted_message(self.client_socket, "4")
-            resp = self.encryptor.receive_encrypted_message(self.client_socket)
-            if resp == "Enter:":
-                name = simpledialog.askstring(title="Image to verify", prompt="Enter name:")
-                self.encryptor.send_encrypted_message(self.client_socket, name)
-                resp = self.encryptor.receive_encrypted_message(self.client_socket)
-                messagebox.showinfo("Verify", resp)
+
+            cmd = self.encryptor.receive_encrypted_message(self.client_socket)
+            print(cmd)
+            if cmd != "SEND_IMAGE":
+                return
+
+            path = filedialog.askopenfilename(filetypes=[("Images", "*.png *.jpg")])
+            if not path:
+                return
+
+            data = open(path, "rb").read()
+
+            self.encryptor.send_encrypted_message(
+                self.client_socket, os.path.basename(path)
+            )
+            self.encryptor.send_encrypted_message(
+                self.client_socket, str(len(data))
+            )
+
+            self.encryptor.receive_encrypted_message(self.client_socket)
+            self.client_socket.sendall(data)
+
+            result = self.encryptor.receive_encrypted_message(self.client_socket)
+            msg = self.encryptor.receive_encrypted_message(self.client_socket)
+
+            if result == "VALID":
+                messagebox.showinfo("Verify Result", f"✅ {msg}")
+            else:
+                messagebox.showerror("Verify Result", f"❌ {msg}")
+
         except Exception as e:
             messagebox.showerror("Verify error", str(e))
 

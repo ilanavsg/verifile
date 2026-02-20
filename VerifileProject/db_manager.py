@@ -309,7 +309,35 @@ class DatabaseManager:
             print(f"Media record inserted: User ID={user_id}, Media Type={media_type_id}, Path={path}")
         else:
             print("Table `decrypted_media` does not exist.")
-    
+
+    def get_available_foreign_works(self, user_id):
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            SELECT file_id, owner_id, stored_filename, price
+            FROM files
+            WHERE owner_id != %s
+              AND (creator_id IS NULL OR creator_id != %s)
+              AND status = 'available'
+            """,
+            (user_id, user_id)
+        )
+        return cursor.fetchall()
+
+    def get_my_works(self, user_id):
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            SELECT stored_filename
+            FROM files
+            WHERE owner_id = %s
+               OR creator_id = %s
+            """,
+            (user_id, user_id)
+        )
+        # Flatten tuples to a simple list
+        return [row[0] for row in cursor.fetchall()]
+
     def close(self):
         """Close the database connection"""
         if self.conn:

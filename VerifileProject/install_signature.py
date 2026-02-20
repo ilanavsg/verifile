@@ -1,3 +1,5 @@
+import io
+
 from Crypto.PublicKey import RSA
 from Crypto.Signature import pss
 from Crypto.Hash import SHA256
@@ -53,36 +55,49 @@ class Signature:
             data = f.read()
         return SHA256.new(data)
 
-    def install_sign_to_img(self, output_path="signed_image.png"):
-        """Sign the image and embed signature in metadata."""
+    def install_sign_to_img(self):
         img = Image.open(self.img_path).convert("RGBA")
         watermarked = install_watermark(img)
-        # embed signature
-        with open(self.img_path, "rb") as f:
-            data = f.read()
-        h = SHA256.new(data)
+
+        # 🔐 HASH PIXEL DATA (DETERMINISTIC)
+        pixel_bytes = watermarked.tobytes()
+        meta_data = f"{watermarked.size}{watermarked.mode}".encode()
+
+        h = SHA256.new(pixel_bytes + meta_data)
+
         private_key = RSA.import_key(open(self.private, "rb").read())
         signature = pss.new(private_key).sign(h)
 
         meta = PngImagePlugin.PngInfo()
         meta.add_text("Signature", signature.hex())
+        meta.add_text("HashAlg", "SHA256")
+        meta.add_text("Mode", watermarked.mode)
+        meta.add_text("Size", f"{watermarked.size[0]}x{watermarked.size[1]}")
+
         watermarked.save(self.watermarked, "PNG", pnginfo=meta)
 
     def verify_signature(self, image_path=None):
-        """Verify the signature of an image."""
-        img = Image.open(self.watermarked)
+        if not image_path:
+            image_path = self.img_path
+
+        img = Image.open(image_path).convert("RGBA")
+
         signature_hex = img.info.get("Signature")
         if not signature_hex:
-            print("No signature found in the image.")
-            exit()
+            return False, "No signature found"
+
         signature = bytes.fromhex(signature_hex)
-        with open(self.img_path, "rb") as f:
-            data = f.read()
-        h = SHA256.new(data)
+
+        # 🔐 SAME HASH METHOD
+        pixel_bytes = img.tobytes()
+        meta_data = f"{img.size}{img.mode}".encode()
+        h = SHA256.new(pixel_bytes + meta_data)
+
         public_key = RSA.import_key(open(self.public, "rb").read())
         verifier = pss.new(public_key)
+
         try:
             verifier.verify(h, signature)
-            print("Signature is valid. Image not tampered.")
+            return True, "Signature valid"
         except (ValueError, TypeError):
-            print("Signature verification failed. Image may have been altered.")
+            return False, "Signature verification failed"
