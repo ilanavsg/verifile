@@ -60,7 +60,6 @@ class Client:
         if resp2:
             self.client_id = int(resp2)
         resp3 = self.encryptor.receive_encrypted_message(self.client_socket)
-        print(resp3)
         if resp3.startswith("WORKS:"):
             cmd, data = resp3.split(":", 1)
             self.my_works = json.loads(data)
@@ -175,7 +174,6 @@ class Client:
 
     def buy_action(self):
         try:
-            # Request buy list from server
             self.encryptor.send_encrypted_message(self.client_socket, "2")
         except Exception as e:
             messagebox.showerror("Error", str(e))
@@ -183,13 +181,11 @@ class Client:
 
         self.show_page("buy_page")
 
-        # Clear old widgets
         for widget in self.pages["buy_page"].scrollable_frame.winfo_children():
             widget.destroy()
 
         images = []
         try:
-            # Receive all images info (name, price, base64 data)
             while True:
                 img_name = self.encryptor.receive_encrypted_message(self.client_socket)
                 if not img_name:
@@ -203,12 +199,10 @@ class Client:
             messagebox.showerror("Error", str(e))
             return
 
-        # Render images as thumbnails
         for name, price, data in images:
             frame = tk.Frame(self.pages["buy_page"].scrollable_frame, bg="#ffe6f0", bd=2, relief="ridge")
             frame.pack(padx=10, pady=10, fill="x")
 
-            # Thumbnail image
             photo = None
             if data:
                 try:
@@ -221,7 +215,7 @@ class Client:
 
             if photo:
                 lbl_img = tk.Label(frame, image=photo)
-                lbl_img.image = photo  # keep reference per widget
+                lbl_img.image = photo
                 lbl_img.pack(side="left", padx=10)
 
             tk.Label(frame, text=f"{name}\nPrice: {price}", bg="#ffe6f0", justify="left").pack(side="left", padx=10)
@@ -235,7 +229,6 @@ class Client:
 
     def confirm_purchase(self, image_name, frame_widget):
         try:
-            # Send purchase request
             self.encryptor.send_encrypted_message(self.client_socket, f"BUY:{image_name}")
             resp = self.encryptor.receive_encrypted_message(self.client_socket)
 
@@ -243,13 +236,11 @@ class Client:
                 messagebox.showerror("Purchase failed", resp)
                 return
 
-            # Receive filename and size
             info = self.encryptor.receive_encrypted_message(self.client_socket)
             filename, filesize = info.split("|")
             filesize = int(filesize)
 
             self.encryptor.send_encrypted_message(self.client_socket, "READY")
-
             out_path = os.path.join(os.path.expanduser("~"), "Desktop", filename)
 
             received_bytes = b""
@@ -268,7 +259,7 @@ class Client:
 
             messagebox.showinfo("Purchase", f"You bought {image_name}!\nSaved to Desktop.")
             frame_widget.destroy()
-            self.render_storage()  # refresh storage page
+            self.render_storage()
 
         except Exception as e:
             messagebox.showerror("Error", str(e))

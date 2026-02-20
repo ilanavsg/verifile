@@ -176,7 +176,6 @@ class Server:
 
         base_dir = r"C:\\Users\\Cyber_User\\Desktop\\verifile\\VerifileProject\\"
 
-        # Send available files to client
         for file_id, owner_id, filename, price in foreign_works:
             stored_filename = filename
             price = price
@@ -195,47 +194,36 @@ class Server:
             self.encryptor.send_encrypted_message(client_socket, stored_filename)
             self.encryptor.send_encrypted_message(client_socket, str(price))
             self.encryptor.send_encrypted_message(client_socket, thumbnail_b64)
-
             files_dict[stored_filename] = (path, price, owner_id)
 
-        # Signal end of list
         self.encryptor.send_encrypted_message(client_socket, "")
 
-        # Receive purchase request
         server_msg = self.encryptor.receive_encrypted_message(client_socket)
         if not server_msg:
-            return  # client didn't send anything, ignore
+            return
 
         parts = server_msg.split(":", 1)
         if parts[0] == "BUY" and parts[1] in files_dict:
-
             full_path, price, original_owner = files_dict[parts[1]]
-
-            # Fetch buyer balance
             cursor = self.db_manager.conn.cursor()
             cursor.execute("SELECT balance FROM clients WHERE user_id = %s", (user_id,))
             balance_rows = cursor.fetchall()
             if not balance_rows:
                 self.encryptor.send_encrypted_message(client_socket, "FAILED: no balance")
                 return
-
             balance = balance_rows[0][0]
             if balance < price:
                 self.encryptor.send_encrypted_message(client_socket, "FAILED: insufficient funds")
                 return
-
-            # Deduct price from buyer
             new_balance = balance - price
             self.db_manager.update_row("clients", "user_id", user_id, ["balance"], [new_balance])
 
-            # Add money to seller if applicable
             if original_owner:
                 owner_rows = self.db_manager.get_column_values_by_user_id("clients", "balance", original_owner)
                 if owner_rows:
                     owner_balance = owner_rows[0][0]
                     self.db_manager.update_row("clients", "user_id", original_owner, ["balance"], [owner_balance + price])
 
-            # Transfer ownership and mark sold
             self.db_manager.update_row(
                 "files",
                 "stored_filename",
@@ -244,7 +232,6 @@ class Server:
                 [user_id, "sold"]
             )
 
-            # Send full file to buyer
             try:
                 self.encryptor.send_encrypted_message(client_socket, "SUCCESS")
                 self.send_file_to_client(client_socket, full_path)
@@ -300,7 +287,10 @@ class Server:
 
             img_bytes = b""
             while len(img_bytes) < size:
-                img_bytes += client_socket.recv(4096)
+                chunk = client_socket.recv(min(4096, size - len(img_bytes)))
+                if not chunk:
+                    raise ConnectionError("Client disconnected during image upload")
+                img_bytes += chunk
 
             temp_path = f"sell_{filename}"
             with open(temp_path, "wb") as f:
@@ -314,7 +304,7 @@ class Server:
             self.db_manager.insert_row(
                 "history_table",
                 "(file_id, user_id, action, hash_value, signature, verified, created_at)",
-                "(?,?,?,?,?,?,?)",
+                "(%s,%s,%s,%s,%s,%s,%s)",
                 (None, user_id, "verify", hash_hex, signature_hex, verified, datetime.now())
             )
 
@@ -324,6 +314,7 @@ class Server:
                 return
 
             price = self.encryptor.receive_encrypted_message(client_socket)
+            price = float(price)
 
             self.db_manager.update_row(
                 "files",
