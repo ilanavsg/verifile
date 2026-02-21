@@ -56,6 +56,7 @@ class Client:
         self.encryptor.send_encrypted_message(self.client_socket, password)
         self.encryptor.send_encrypted_message(self.client_socket, email)
         self.encryptor.send_encrypted_message(self.client_socket, role)
+        self.encryptor.receive_encrypted_message(self.client_socket)
         resp2 = self.encryptor.receive_encrypted_message(self.client_socket)
         if resp2:
             self.client_id = int(resp2)

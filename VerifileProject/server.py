@@ -441,6 +441,7 @@ class Server:
                 user_id = existing[0][0]
                 db_password = existing[0][4]
                 if bcrypt.checkpw(password.encode(), db_password.encode()):
+                    self.encryptor.send_encrypted_message(client_socket, "WELCOME")
                     client_status = "EXISTING"
                     self.encryptor.send_encrypted_message(client_socket, str(user_id))
                     all_works = self.db_manager.get_my_works(user_id)
