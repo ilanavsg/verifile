@@ -21,7 +21,7 @@ def create_all_tables(db_manager):
             last_visit DATETIME,
             ddos_status BOOLEAN DEFAULT FALSE,
             balance INT DEFAULT 1000,
-            role TEXT CHECK (role IN ('buyer', 'seller', 'admin'))
+            role TEXT DEFAULT 'buyer' CHECK (role IN ('buyer', 'seller', 'admin'))
         )"""
     )
 

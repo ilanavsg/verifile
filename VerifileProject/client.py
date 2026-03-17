@@ -1,4 +1,5 @@
 import io
+import re
 import socket
 import os
 import threading
@@ -68,29 +69,45 @@ class Client:
     def show_login_window(self):
         creds = {}
         def submit():
-            creds["username"] = e_user.get()
-            creds["password"] = e_pass.get()
-            creds["email"] = e_email.get()
-            creds["role"] = role_var.get()
+            user = e_user.get()
+            pwd = e_pass.get()
+            eml = e_email.get()
+
+            if len(pwd) < 8:
+                messagebox.showwarning("Invalid Password", "Your password must be at least 8 characters long.")
+                return
+
+            email_pattern = r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$"
+            if not re.match(email_pattern, eml):
+                messagebox.showwarning("Invalid Email", "Please enter a valid email address.")
+                return
+
+            creds["username"] = user
+            creds["password"] = pwd
+            creds["email"] = eml
+            creds["role"] = "buyer"
             login.destroy()
+
         login = tk.Tk()
         login.title("Login")
         login.geometry("320x280")
         login.config(bg="#ffe6f0")
+
         tk.Label(login, text="Username:", bg="#ffe6f0").pack(pady=5)
         e_user = tk.Entry(login)
         e_user.pack()
+
         tk.Label(login, text="Password:", bg="#ffe6f0").pack(pady=5)
         e_pass = tk.Entry(login, show="*")
         e_pass.pack()
+
         tk.Label(login, text="Email:", bg="#ffe6f0").pack(pady=5)
         e_email = tk.Entry(login)
         e_email.pack()
-        tk.Label(login, text="Role:", bg="#ffe6f0").pack(pady=5)
-        role_var = tk.StringVar(value="buyer")
-        tk.OptionMenu(login, role_var, "buyer", "seller", "admin").pack()
+
         tk.Button(login, text="Login", command=submit, bg="#ffd1dc").pack(pady=12)
         login.mainloop()
+
         return creds.get("username"), creds.get("password"), creds.get("email"), creds.get("role")
 
     def send_image_bytes(self, path):

@@ -1,5 +1,6 @@
 # Ilana Ben Guy
 # Project VeriFile
+import re
 import tkinter as tk
 from tkinter import Label, scrolledtext, Toplevel, Listbox, Button
 from PIL import Image, ImageTk
@@ -432,7 +433,16 @@ class Server:
             password = self.encryptor.receive_encrypted_message(client_socket)
             email = self.encryptor.receive_encrypted_message(client_socket)
             role = self.encryptor.receive_encrypted_message(client_socket)
-            if not username or not password:
+
+            if not username or not password or not email:
+                client_socket.close()
+                return
+
+            email_pattern = r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$"
+
+            if len(password) < 8 or not re.match(email_pattern, email):
+                self.encryptor.send_encrypted_message(client_socket, "INVALID_FORMAT")
+                self.update_gui_log(f"Connection rejected for '{username}': Invalid email or password format.")
                 client_socket.close()
                 return
 
