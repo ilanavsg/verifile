@@ -59,7 +59,6 @@ class Signature:
         img = Image.open(self.img_path).convert("RGBA")
         watermarked = install_watermark(img)
 
-        # 🔐 HASH PIXEL DATA (DETERMINISTIC)
         pixel_bytes = watermarked.tobytes()
         meta_data = f"{watermarked.size}{watermarked.mode}".encode()
 
@@ -88,7 +87,6 @@ class Signature:
 
         signature = bytes.fromhex(signature_hex)
 
-        # 🔐 SAME HASH METHOD
         pixel_bytes = img.tobytes()
         meta_data = f"{img.size}{img.mode}".encode()
         h = SHA256.new(pixel_bytes + meta_data)

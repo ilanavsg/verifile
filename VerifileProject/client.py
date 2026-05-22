@@ -28,6 +28,8 @@ class Client:
         self.client_id = None
         self.storage_list_frame = None
         self.my_works = []
+        # Added Lock to prevent socket collision
+        self.network_lock = threading.Lock()
 
     def connect_to_server(self):
         try:
@@ -41,30 +43,33 @@ class Client:
             return False
 
     def send_client_info(self):
-        documents_path = Path.home() / "Documents"
-        auth_file = documents_path / "authentication"
-        if os.path.exists(auth_file):
-            lines = open(auth_file).read().splitlines()
-            if len(lines) >= 4:
-                self.username, password, email, role = lines[0], lines[1], lines[2], lines[3]
+        # Protected with lock for initial handshake
+        with self.network_lock:
+            documents_path = Path.home() / "Documents"
+            auth_file = documents_path / "authentication"
+            if os.path.exists(auth_file):
+                lines = open(auth_file).read().splitlines()
+                if len(lines) >= 4:
+                    self.username, password, email, role = lines[0], lines[1], lines[2], lines[3]
+                else:
+                    self.username, password, email, role = self.show_login_window()
+                    open(auth_file, "w").write(f"{self.username}\n{password}\n{email}\n{role}")
             else:
                 self.username, password, email, role = self.show_login_window()
                 open(auth_file, "w").write(f"{self.username}\n{password}\n{email}\n{role}")
-        else:
-            self.username, password, email, role = self.show_login_window()
-            open(auth_file, "w").write(f"{self.username}\n{password}\n{email}\n{role}")
-        self.encryptor.send_encrypted_message(self.client_socket, self.username)
-        self.encryptor.send_encrypted_message(self.client_socket, password)
-        self.encryptor.send_encrypted_message(self.client_socket, email)
-        self.encryptor.send_encrypted_message(self.client_socket, role)
-        self.encryptor.receive_encrypted_message(self.client_socket)
-        resp2 = self.encryptor.receive_encrypted_message(self.client_socket)
-        if resp2:
-            self.client_id = int(resp2)
-        resp3 = self.encryptor.receive_encrypted_message(self.client_socket)
-        if resp3.startswith("WORKS:"):
-            cmd, data = resp3.split(":", 1)
-            self.my_works = json.loads(data)
+            
+            self.encryptor.send_encrypted_message(self.client_socket, self.username)
+            self.encryptor.send_encrypted_message(self.client_socket, password)
+            self.encryptor.send_encrypted_message(self.client_socket, email)
+            self.encryptor.send_encrypted_message(self.client_socket, role)
+            self.encryptor.receive_encrypted_message(self.client_socket)
+            resp2 = self.encryptor.receive_encrypted_message(self.client_socket)
+            if resp2:
+                self.client_id = int(resp2)
+            resp3 = self.encryptor.receive_encrypted_message(self.client_socket)
+            if resp3.startswith("WORKS:"):
+                cmd, data = resp3.split(":", 1)
+                self.my_works = json.loads(data)
 
     def show_login_window(self):
         creds = {}
@@ -111,6 +116,7 @@ class Client:
         return creds.get("username"), creds.get("password"), creds.get("email"), creds.get("role")
 
     def send_image_bytes(self, path):
+        # Note: This is called inside other locked actions
         try:
             filename = os.path.basename(path)
             data = open(path, "rb").read()
@@ -168,206 +174,212 @@ class Client:
             ).pack(side="left", padx=10)
 
     def upload_action(self):
-        try:
-            self.encryptor.send_encrypted_message(self.client_socket, "1")
-            server_msg = self.encryptor.receive_encrypted_message(self.client_socket)
-            if server_msg:
-                messagebox.showinfo("Server", server_msg)
-            path = filedialog.askopenfilename(filetypes=[("Images", "*.png *.jpg *.jpeg")])
-            if not path:
-                return
-            self.send_image_bytes(path)
-            price = simpledialog.askstring(title="Set Price", prompt="Enter price:")
-            if not price or not price.replace('.', '', 1).isdigit():
-                messagebox.showerror("Invalid price", "Please enter a valid number.")
-                return
+        with self.network_lock: # Protect the entire sequence
+            try:
+                self.encryptor.send_encrypted_message(self.client_socket, "1")
+                server_msg = self.encryptor.receive_encrypted_message(self.client_socket)
+                if server_msg:
+                    messagebox.showinfo("Server", server_msg)
+                path = filedialog.askopenfilename(filetypes=[("Images", "*.png *.jpg *.jpeg")])
+                if not path:
+                    return
+                self.send_image_bytes(path)
+                price = simpledialog.askstring(title="Set Price", prompt="Enter price:")
+                if not price or not price.replace('.', '', 1).isdigit():
+                    messagebox.showerror("Invalid price", "Please enter a valid number.")
+                    return
 
-            self.encryptor.send_encrypted_message(self.client_socket, price)
-            resp1 = self.encryptor.receive_encrypted_message(self.client_socket)
-            if resp1:
-                messagebox.showinfo("Result", resp1)
+                self.encryptor.send_encrypted_message(self.client_socket, price)
+                resp1 = self.encryptor.receive_encrypted_message(self.client_socket)
+                if resp1:
+                    messagebox.showinfo("Result", resp1)
 
-        except Exception as e:
-            messagebox.showerror("Upload error", str(e))
+            except Exception as e:
+                messagebox.showerror("Upload error", str(e))
 
     def buy_action(self):
-        try:
-            self.encryptor.send_encrypted_message(self.client_socket, "2")
-        except Exception as e:
-            messagebox.showerror("Error", str(e))
-            return
+        with self.network_lock:
+            try:
+                self.encryptor.send_encrypted_message(self.client_socket, "2")
+            except Exception as e:
+                messagebox.showerror("Error", str(e))
+                return
 
-        self.show_page("buy_page")
+            self.show_page("buy_page")
 
-        for widget in self.pages["buy_page"].scrollable_frame.winfo_children():
-            widget.destroy()
+            for widget in self.pages["buy_page"].scrollable_frame.winfo_children():
+                widget.destroy()
 
-        images = []
-        try:
-            while True:
-                img_name = self.encryptor.receive_encrypted_message(self.client_socket)
-                if not img_name:
-                    break
-                price = self.encryptor.receive_encrypted_message(self.client_socket)
-                img_data = self.encryptor.receive_encrypted_message(self.client_socket)
-                if img_name is None or price is None or img_data is None:
-                    break
-                images.append((img_name, price, img_data))
-        except Exception as e:
-            messagebox.showerror("Error", str(e))
-            return
+            images = []
+            try:
+                while True:
+                    img_name = self.encryptor.receive_encrypted_message(self.client_socket)
+                    if not img_name:
+                        break
+                    price = self.encryptor.receive_encrypted_message(self.client_socket)
+                    img_data = self.encryptor.receive_encrypted_message(self.client_socket)
+                    if img_name is None or price is None or img_data is None:
+                        break
+                    images.append((img_name, price, img_data))
+            except Exception as e:
+                messagebox.showerror("Error", str(e))
+                return
 
-        for name, price, data in images:
-            frame = tk.Frame(self.pages["buy_page"].scrollable_frame, bg="#ffe6f0", bd=2, relief="ridge")
-            frame.pack(padx=10, pady=10, fill="x")
+            for name, price, data in images:
+                frame = tk.Frame(self.pages["buy_page"].scrollable_frame, bg="#ffe6f0", bd=2, relief="ridge")
+                frame.pack(padx=10, pady=10, fill="x")
 
-            photo = None
-            if data:
-                try:
-                    with BytesIO(base64.b64decode(data)) as img_bytes:
-                        pil_img = Image.open(img_bytes)
-                        pil_img.thumbnail((150, 150))
-                        photo = ImageTk.PhotoImage(pil_img)
-                except Exception:
-                    photo = None
+                photo = None
+                if data:
+                    try:
+                        with BytesIO(base64.b64decode(data)) as img_bytes:
+                            pil_img = Image.open(img_bytes)
+                            pil_img.thumbnail((150, 150))
+                            photo = ImageTk.PhotoImage(pil_img)
+                    except Exception:
+                        photo = None
 
-            if photo:
-                lbl_img = tk.Label(frame, image=photo)
-                lbl_img.image = photo
-                lbl_img.pack(side="left", padx=10)
+                if photo:
+                    lbl_img = tk.Label(frame, image=photo)
+                    lbl_img.image = photo
+                    lbl_img.pack(side="left", padx=10)
 
-            tk.Label(frame, text=f"{name}\nPrice: {price}", bg="#ffe6f0", justify="left").pack(side="left", padx=10)
+                tk.Label(frame, text=f"{name}\nPrice: {price}", bg="#ffe6f0", justify="left").pack(side="left", padx=10)
 
-            tk.Button(
-                frame,
-                text="Buy",
-                bg="#ffd1dc",
-                command=partial(self.confirm_purchase, name, frame)
-            ).pack(side="right", padx=10)
+                tk.Button(
+                    frame,
+                    text="Buy",
+                    bg="#ffd1dc",
+                    command=partial(self.confirm_purchase, name, frame)
+                ).pack(side="right", padx=10)
 
     def confirm_purchase(self, image_name, frame_widget):
-        try:
-            self.encryptor.send_encrypted_message(self.client_socket, f"BUY:{image_name}")
-            resp = self.encryptor.receive_encrypted_message(self.client_socket)
+        with self.network_lock:
+            try:
+                self.encryptor.send_encrypted_message(self.client_socket, f"BUY:{image_name}")
+                resp = self.encryptor.receive_encrypted_message(self.client_socket)
 
-            if resp != "SUCCESS":
-                messagebox.showerror("Purchase failed", resp)
-                return
+                if resp != "SUCCESS":
+                    messagebox.showerror("Purchase failed", resp)
+                    return
 
-            info = self.encryptor.receive_encrypted_message(self.client_socket)
-            filename, filesize = info.split("|")
-            filesize = int(filesize)
+                info = self.encryptor.receive_encrypted_message(self.client_socket)
+                filename, filesize = info.split("|")
+                filesize = int(filesize)
 
-            self.encryptor.send_encrypted_message(self.client_socket, "READY")
-            out_path = os.path.join(os.path.expanduser("~"), "Desktop", filename)
+                self.encryptor.send_encrypted_message(self.client_socket, "READY")
+                out_path = os.path.join(os.path.expanduser("~"), "Desktop", filename)
 
-            received_bytes = b""
-            while len(received_bytes) < filesize:
-                chunk = self.client_socket.recv(min(4096, filesize - len(received_bytes)))
-                if not chunk:
-                    break
-                received_bytes += chunk
+                received_bytes = b""
+                while len(received_bytes) < filesize:
+                    chunk = self.client_socket.recv(min(4096, filesize - len(received_bytes)))
+                    if not chunk:
+                        break
+                    received_bytes += chunk
 
-            if len(received_bytes) == filesize:
-                with open(out_path, "wb") as f:
-                    f.write(received_bytes)
-                print("File received successfully")
-            else:
-                print("File incomplete or failed")
+                if len(received_bytes) == filesize:
+                    with open(out_path, "wb") as f:
+                        f.write(received_bytes)
+                    print("File received successfully")
+                else:
+                    print("File incomplete or failed")
 
-            messagebox.showinfo("Purchase", f"You bought {image_name}!\nSaved to Desktop.")
-            frame_widget.destroy()
-            self.render_storage()
+                messagebox.showinfo("Purchase", f"You bought {image_name}!\nSaved to Desktop.")
+                frame_widget.destroy()
+                self.render_storage()
 
-        except Exception as e:
-            messagebox.showerror("Error", str(e))
+            except Exception as e:
+                messagebox.showerror("Error", str(e))
 
     def sell_action(self):
-        try:
-            self.encryptor.send_encrypted_message(self.client_socket, "3")
-            cmd = self.encryptor.receive_encrypted_message(self.client_socket)
+        with self.network_lock:
+            try:
+                self.encryptor.send_encrypted_message(self.client_socket, "3")
+                cmd = self.encryptor.receive_encrypted_message(self.client_socket)
 
-            if cmd != "SEND_IMAGE":
-                return
+                if cmd != "SEND_IMAGE":
+                    return
 
-            path = filedialog.askopenfilename(filetypes=[("Images", "*.png *.jpg *jpeg")])
-            if not path:
-                return
+                path = filedialog.askopenfilename(filetypes=[("Images", "*.png *.jpg *jpeg")])
+                if not path:
+                    return
 
-            filename = os.path.basename(path)
-            data = open(path, "rb").read()
-            price = simpledialog.askstring("Sell Image", "Enter price:")
-            if not price:
-                return
-            
-            self.encryptor.send_encrypted_message(self.client_socket, filename)
-            self.encryptor.send_encrypted_message(self.client_socket, str(len(data)))
-            self.encryptor.receive_encrypted_message(self.client_socket)
-            self.client_socket.sendall(data)
-            self.encryptor.send_encrypted_message(self.client_socket, price)
-            result = self.encryptor.receive_encrypted_message(self.client_socket)
-            msg = self.encryptor.receive_encrypted_message(self.client_socket)
+                filename = os.path.basename(path)
+                data = open(path, "rb").read()
+                price = simpledialog.askstring("Sell Image", "Enter price:")
+                if not price:
+                    return
+                
+                self.encryptor.send_encrypted_message(self.client_socket, filename)
+                self.encryptor.send_encrypted_message(self.client_socket, str(len(data)))
+                self.encryptor.receive_encrypted_message(self.client_socket)
+                self.client_socket.sendall(data)
+                self.encryptor.send_encrypted_message(self.client_socket, price)
+                result = self.encryptor.receive_encrypted_message(self.client_socket)
+                msg = self.encryptor.receive_encrypted_message(self.client_socket)
 
-            if result == "SUCCESS":
-                messagebox.showinfo("Sell Result", msg)
-            else:
-                messagebox.showerror("Sell Error", msg)
+                if result == "SUCCESS":
+                    messagebox.showinfo("Sell Result", msg)
+                else:
+                    messagebox.showerror("Sell Error", msg)
 
-        except Exception as e:
-            messagebox.showerror("Sell error", str(e))
+            except Exception as e:
+                messagebox.showerror("Sell error", str(e))
 
     def verify_action(self):
-        try:
-            self.encryptor.send_encrypted_message(self.client_socket, "4")
+        with self.network_lock:
+            try:
+                self.encryptor.send_encrypted_message(self.client_socket, "4")
 
-            cmd = self.encryptor.receive_encrypted_message(self.client_socket)
-            print(cmd)
-            if cmd != "SEND_IMAGE":
-                return
+                cmd = self.encryptor.receive_encrypted_message(self.client_socket)
+                print(cmd)
+                if cmd != "SEND_IMAGE":
+                    return
 
-            path = filedialog.askopenfilename(filetypes=[("Images", "*.png *.jpg")])
-            if not path:
-                return
+                path = filedialog.askopenfilename(filetypes=[("Images", "*.png *.jpg")])
+                if not path:
+                    return
 
-            data = open(path, "rb").read()
+                data = open(path, "rb").read()
 
-            self.encryptor.send_encrypted_message(
-                self.client_socket, os.path.basename(path)
-            )
-            self.encryptor.send_encrypted_message(
-                self.client_socket, str(len(data))
-            )
+                self.encryptor.send_encrypted_message(
+                    self.client_socket, os.path.basename(path)
+                )
+                self.encryptor.send_encrypted_message(
+                    self.client_socket, str(len(data))
+                )
 
-            self.encryptor.receive_encrypted_message(self.client_socket)
-            self.client_socket.sendall(data)
+                self.encryptor.receive_encrypted_message(self.client_socket)
+                self.client_socket.sendall(data)
 
-            result = self.encryptor.receive_encrypted_message(self.client_socket)
-            msg = self.encryptor.receive_encrypted_message(self.client_socket)
+                result = self.encryptor.receive_encrypted_message(self.client_socket)
+                msg = self.encryptor.receive_encrypted_message(self.client_socket)
 
-            if result == "VALID":
-                messagebox.showinfo("Verify Result", f"✅ {msg}")
-            else:
-                messagebox.showerror("Verify Result", f"❌ {msg}")
+                if result == "VALID":
+                    messagebox.showinfo("Verify Result", f"✅ {msg}")
+                else:
+                    messagebox.showerror("Verify Result", f"❌ {msg}")
 
-        except Exception as e:
-            messagebox.showerror("Verify error", str(e))
+            except Exception as e:
+                messagebox.showerror("Verify error", str(e))
 
     def exit_app(self):
-        try:
-            if self.client_socket:
-                self.encryptor.send_encrypted_message(self.client_socket, "5")
-                try:
-                    self.encryptor.receive_encrypted_message(self.client_socket)
-                except:
-                    pass
+        with self.network_lock:
+            try:
+                if self.client_socket:
+                    self.encryptor.send_encrypted_message(self.client_socket, "5")
+                    try:
+                        self.encryptor.receive_encrypted_message(self.client_socket)
+                    except:
+                        pass
 
-                try:
-                    self.client_socket.shutdown(socket.SHUT_RDWR)
-                except:
-                    pass
-                self.client_socket.close()
-        except:
-            pass
+                    try:
+                        self.client_socket.shutdown(socket.SHUT_RDWR)
+                    except:
+                        pass
+                    self.client_socket.close()
+            except:
+                pass
 
         if self.root:
             self.root.destroy()
